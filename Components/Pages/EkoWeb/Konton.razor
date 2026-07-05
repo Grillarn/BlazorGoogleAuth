@@ -1,0 +1,281 @@
+@page "/ekoweb/konton"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject IEkoWebService EkoWebService
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Konton</PageTitle>
+
+<h1>Konton</h1>
+@if (_isAdmin)
+{
+    <p class="page-lede">
+        Konton kopplas till en <a href="ekoweb/kontotyper">kontotyp</a> och ett <a href="ekoweb/institut">institut</a>,
+        och kan delas mellan flera användare (med en procentandel var) via kopplingstabellen Konto_Anvadare.
+    </p>
+}
+else
+{
+    <p class="page-lede">Konton du är kopplad till.</p>
+}
+
+@if (_isAdmin)
+{
+    <div class="card">
+        <h2 style="margin-top:0">Lägg till konto</h2>
+        <div class="add-role-form" style="flex-wrap:wrap">
+            <input type="text" placeholder="Namn" @bind="_namn" @bind:event="oninput" />
+            <input type="text" placeholder="Kontonr (valfritt)" @bind="_kontoNr" @bind:event="oninput" />
+            <input type="text" placeholder="Beskrivning (valfritt)" @bind="_beskrivning" @bind:event="oninput" />
+            <select @bind="_kontotypId">
+                <option value="0" disabled>Välj kontotyp</option>
+                @foreach (var kt in _kontotyper ?? [])
+                {
+                    <option value="@kt.Id">@kt.Namn</option>
+                }
+            </select>
+            <select @bind="_institutId">
+                <option value="0" disabled>Välj institut</option>
+                @foreach (var b in _institut ?? [])
+                {
+                    <option value="@b.Id">@b.Namn</option>
+                }
+            </select>
+            <button type="button" class="btn" @onclick="Create">Lägg till konto</button>
+        </div>
+        @if (!string.IsNullOrEmpty(_message))
+        {
+            <p class="@(_messageIsError ? "form-error" : "form-success")">@_message</p>
+        }
+    </div>
+}
+
+@if (_loadError is not null)
+{
+    <div class="card"><p class="form-error">@_loadError</p></div>
+}
+else if (_konton is null)
+{
+    <p class="empty-state">Laddar…</p>
+}
+else if (_konton.Count == 0)
+{
+    <div class="card"><p class="empty-state">Inga konton hittades.</p></div>
+}
+else
+{
+    <div class="card card-table">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Namn</th>
+                    <th>Kontonr</th>
+                    <th>Kontotyp</th>
+                    <th>Institut</th>
+                    <th>Kopplade användare</th>
+                    @if (_isAdmin)
+                    {
+                        <th></th>
+                    }
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var konto in _konton)
+                {
+                    <tr>
+                        @if (_isAdmin && _editingId == konto.Id)
+                        {
+                            <td><input type="text" @bind="_editNamn" /></td>
+                            <td><input type="text" @bind="_editKontoNr" /></td>
+                            <td>
+                                <select @bind="_editKontotypId">
+                                    @foreach (var kt in _kontotyper ?? [])
+                                    {
+                                        <option value="@kt.Id">@kt.Namn</option>
+                                    }
+                                </select>
+                            </td>
+                            <td>
+                                <select @bind="_editInstitutId">
+                                    @foreach (var b in _institut ?? [])
+                                    {
+                                        <option value="@b.Id">@b.Namn</option>
+                                    }
+                                </select>
+                            </td>
+                            <td colspan="2">
+                                <button type="button" class="btn" @onclick="() => SaveEdit(konto.Id)">Spara</button>
+                                <button type="button" class="btn-delete-role" @onclick="CancelEdit">Avbryt</button>
+                            </td>
+                        }
+                        else
+                        {
+                            <td>@konto.Namn</td>
+                            <td>@konto.KontoNr</td>
+                            <td>@konto.Kontotyp.Namn</td>
+                            <td>@konto.Institut.Namn</td>
+                            <td>
+                                @foreach (var link in konto.Anvandare)
+                                {
+                                    <span class="role-badge">
+                                        @link.Anvandare.Fornamn @link.Anvandare.Efternamn (@link.AndelProcent%)
+                                        @if (_isAdmin)
+                                        {
+                                            <button type="button" class="role-remove" title="Ta bort kopplingen" @onclick="() => RemoveAnvandare(link.Id)">✕</button>
+                                        }
+                                    </span>
+                                }
+                                @if (_isAdmin)
+                                {
+                                    <div class="add-role-cell" style="margin-top:0.4rem">
+                                        <select @bind="_selectedAnvandare[konto.Id]">
+                                            @foreach (var a in _anvandare ?? [])
+                                            {
+                                                <option value="@a.Id">@a.Fornamn @a.Efternamn</option>
+                                            }
+                                        </select>
+                                        <input type="number" min="0" max="100" step="1" style="width:70px" @bind="_andelInput[konto.Id]" />
+                                        <button type="button" class="btn" @onclick="() => AddAnvandare(konto.Id)">Koppla</button>
+                                    </div>
+                                }
+                            </td>
+                            @if (_isAdmin)
+                            {
+                                <td>
+                                    <button type="button" class="btn-delete-role" @onclick="() => StartEdit(konto)">Redigera</button>
+                                    <button type="button" class="btn-delete-role" @onclick="() => Delete(konto.Id)">Ta bort</button>
+                                </td>
+                            }
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private bool _isAdmin;
+    private string? _loadError;
+    private List<Konto>? _konton;
+    private List<Kontotyp>? _kontotyper;
+    private List<Institut>? _institut;
+    private List<Anvandare>? _anvandare;
+    private readonly Dictionary<int, int> _selectedAnvandare = new();
+    private readonly Dictionary<int, decimal> _andelInput = new();
+
+    private string _namn = string.Empty;
+    private string _kontoNr = string.Empty;
+    private string _beskrivning = string.Empty;
+    private int _kontotypId;
+    private int _institutId;
+    private string? _message;
+    private bool _messageIsError;
+
+    private int? _editingId;
+    private string _editNamn = string.Empty;
+    private string _editKontoNr = string.Empty;
+    private int _editKontotypId;
+    private int _editInstitutId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        _isAdmin = authState.User.IsInRole("Admin");
+
+        try
+        {
+            if (_isAdmin)
+            {
+                _kontotyper = await EkoWebService.GetKontotyperAsync();
+                _institut = await EkoWebService.GetInstitutAsync();
+                _anvandare = await EkoWebService.GetAnvandareAsync();
+            }
+
+            await Load();
+        }
+        catch (HttpRequestException)
+        {
+            _loadError = "Kunde inte nå EkoWebApi. Kontrollera att det körs (se README).";
+        }
+    }
+
+    private async Task Load()
+    {
+        _konton = await EkoWebService.GetKontonAsync();
+        foreach (var konto in _konton)
+        {
+            _selectedAnvandare.TryAdd(konto.Id, _anvandare?.FirstOrDefault()?.Id ?? 0);
+            _andelInput.TryAdd(konto.Id, 100);
+        }
+    }
+
+    private async Task Create()
+    {
+        if (_kontotypId == 0 || _institutId == 0)
+        {
+            _message = "Välj kontotyp och institut.";
+            _messageIsError = true;
+            return;
+        }
+
+        var (success, error) = await EkoWebService.CreateKontoAsync(_namn, _kontoNr, _beskrivning, _kontotypId, _institutId);
+        _message = success ? $"Kontot \"{_namn.Trim()}\" skapades." : error;
+        _messageIsError = !success;
+        if (success)
+        {
+            _namn = string.Empty;
+            _kontoNr = string.Empty;
+            _beskrivning = string.Empty;
+            await Load();
+        }
+    }
+
+    private void StartEdit(Konto konto)
+    {
+        _editingId = konto.Id;
+        _editNamn = konto.Namn;
+        _editKontoNr = konto.KontoNr ?? string.Empty;
+        _editKontotypId = konto.KontotypId;
+        _editInstitutId = konto.InstitutId;
+    }
+
+    private void CancelEdit() => _editingId = null;
+
+    private async Task SaveEdit(int id)
+    {
+        var konto = _konton?.First(k => k.Id == id);
+        var (success, error) = await EkoWebService.UpdateKontoAsync(id, _editNamn, _editKontoNr, konto?.Beskrivning, _editKontotypId, _editInstitutId);
+        _message = success ? "Kontot uppdaterades." : error;
+        _messageIsError = !success;
+        if (success)
+        {
+            _editingId = null;
+            await Load();
+        }
+    }
+
+    private async Task Delete(int id)
+    {
+        var (success, error) = await EkoWebService.DeleteKontoAsync(id);
+        _message = success ? "Kontot togs bort." : error;
+        _messageIsError = !success;
+        await Load();
+    }
+
+    private async Task AddAnvandare(int kontoId)
+    {
+        var anvandareId = _selectedAnvandare.GetValueOrDefault(kontoId);
+        var andel = _andelInput.GetValueOrDefault(kontoId);
+        var (success, error) = await EkoWebService.AddKontoAnvandareAsync(kontoId, anvandareId, andel);
+        _message = success ? "Användaren kopplades till kontot." : error;
+        _messageIsError = !success;
+        await Load();
+    }
+
+    private async Task RemoveAnvandare(int linkId)
+    {
+        await EkoWebService.RemoveKontoAnvandareAsync(linkId);
+        await Load();
+    }
+}

@@ -4,15 +4,37 @@ using BlazorGoogleAuth.Data.Entities;
 
 namespace BlazorGoogleAuth.Services;
 
+/// <summary>
+/// De profilfält vi hämtar ut ur Google-inloggningens claims. Övriga fält än
+/// Email och DisplayName är valfria eftersom exakt vilka claims Google skickar
+/// kan variera.
+/// </summary>
+public record GoogleProfile(
+    string Email,
+    string? DisplayName,
+    string? GoogleId,
+    string? GivenName,
+    string? Surname,
+    string? PictureUrl);
+
 public interface IUserRoleService
 {
     /// <summary>
-    /// Hämtar roller för en inloggad e-post. Om användaren inte finns i databasen
+    /// Hämtar roller för en inloggad användare. Om användaren inte finns i databasen
     /// sedan tidigare skapas den (provisioneras) automatiskt med grundrollen "User".
     /// </summary>
-    Task<IReadOnlyList<string>> GetOrProvisionRolesAsync(string email, string? displayName);
+    Task<IReadOnlyList<string>> GetOrProvisionRolesAsync(GoogleProfile profile);
 
     Task<List<AppUser>> GetAllUsersAsync();
+
+    /// <summary>
+    /// Skapar en användare manuellt, utan att personen behöver ha loggat in
+    /// via Google först. Praktiskt för att förbereda roller åt någon i förväg -
+    /// när de sedan loggar in med samma e-postadress kopplas de automatiskt
+    /// till den här posten istället för att en ny skapas.
+    /// Returnerar false om e-postadressen redan finns.
+    /// </summary>
+    Task<(bool Success, string? Error)> CreateUserAsync(string email, string? displayName);
 
     /// <summary>
     /// Tilldelar en användare en roll. Returnerar false om rolltypen inte
@@ -30,7 +52,12 @@ public interface IUserRoleService
     /// Skapar en ny rolltyp. Returnerar false om namnet redan finns
     /// (skiftlägesokänsligt) eller är tomt.
     /// </summary>
-    Task<bool> CreateRoleDefinitionAsync(string name);
+    Task<bool> CreateRoleDefinitionAsync(string name, string? description = null);
+
+    /// <summary>
+    /// Uppdaterar beskrivningen för en befintlig rolltyp.
+    /// </summary>
+    Task UpdateRoleDescriptionAsync(string name, string? description);
 
     /// <summary>
     /// Tar bort en rolltyp. Misslyckas om rollen fortfarande är tilldelad
@@ -50,18 +77,22 @@ public class DbUserRoleService : IUserRoleService
         _configuration = configuration;
     }
 
-    public async Task<IReadOnlyList<string>> GetOrProvisionRolesAsync(string email, string? displayName)
+    public async Task<IReadOnlyList<string>> GetOrProvisionRolesAsync(GoogleProfile profile)
     {
         var user = await _db.Users
             .Include(u => u.Roles)
-            .FirstOrDefaultAsync(u => u.Email == email);
+            .FirstOrDefaultAsync(u => u.Email == profile.Email);
 
         if (user is null)
         {
             user = new AppUser
             {
-                Email = email,
-                DisplayName = displayName,
+                Email = profile.Email,
+                DisplayName = profile.DisplayName,
+                GoogleId = profile.GoogleId,
+                GivenName = profile.GivenName,
+                Surname = profile.Surname,
+                PictureUrl = profile.PictureUrl,
                 CreatedAtUtc = DateTime.UtcNow,
             };
 
@@ -74,7 +105,7 @@ public class DbUserRoleService : IUserRoleService
             // så du kan lika gärna tömma listan i appsettings.json när du har
             // minst en admin i databasen.
             var seedAdmins = _configuration.GetSection("Authorization:AdminEmails").Get<string[]>() ?? [];
-            if (seedAdmins.Contains(email, StringComparer.OrdinalIgnoreCase))
+            if (seedAdmins.Contains(profile.Email, StringComparer.OrdinalIgnoreCase))
             {
                 user.Roles.Add(new UserRole { Role = "Admin" });
             }
@@ -82,11 +113,41 @@ public class DbUserRoleService : IUserRoleService
             _db.Users.Add(user);
             await _db.SaveChangesAsync();
         }
-        else if (!string.IsNullOrWhiteSpace(displayName) && user.DisplayName != displayName)
+        else
         {
-            // Håll namnet uppdaterat om det ändras på Google-kontot.
-            user.DisplayName = displayName;
-            await _db.SaveChangesAsync();
+            // Håll profilfälten uppdaterade om de ändras på Google-kontot.
+            var changed = false;
+
+            if (!string.IsNullOrWhiteSpace(profile.DisplayName) && user.DisplayName != profile.DisplayName)
+            {
+                user.DisplayName = profile.DisplayName;
+                changed = true;
+            }
+            if (!string.IsNullOrWhiteSpace(profile.GoogleId) && user.GoogleId != profile.GoogleId)
+            {
+                user.GoogleId = profile.GoogleId;
+                changed = true;
+            }
+            if (!string.IsNullOrWhiteSpace(profile.GivenName) && user.GivenName != profile.GivenName)
+            {
+                user.GivenName = profile.GivenName;
+                changed = true;
+            }
+            if (!string.IsNullOrWhiteSpace(profile.Surname) && user.Surname != profile.Surname)
+            {
+                user.Surname = profile.Surname;
+                changed = true;
+            }
+            if (!string.IsNullOrWhiteSpace(profile.PictureUrl) && user.PictureUrl != profile.PictureUrl)
+            {
+                user.PictureUrl = profile.PictureUrl;
+                changed = true;
+            }
+
+            if (changed)
+            {
+                await _db.SaveChangesAsync();
+            }
         }
 
         return user.Roles.Select(r => r.Role).ToList();
@@ -98,6 +159,35 @@ public class DbUserRoleService : IUserRoleService
             .Include(u => u.Roles)
             .OrderBy(u => u.Email)
             .ToListAsync();
+    }
+
+    public async Task<(bool Success, string? Error)> CreateUserAsync(string email, string? displayName)
+    {
+        email = email.Trim();
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            return (false, "Ange en e-postadress.");
+        }
+
+        var exists = await _db.Users.AnyAsync(u => u.Email.ToLower() == email.ToLower());
+        if (exists)
+        {
+            return (false, $"En användare med e-postadressen \"{email}\" finns redan.");
+        }
+
+        var user = new AppUser
+        {
+            Email = email,
+            DisplayName = string.IsNullOrWhiteSpace(displayName) ? null : displayName.Trim(),
+            CreatedAtUtc = DateTime.UtcNow,
+        };
+
+        // Samma grundroll som vid automatisk provisionering via Google-inloggning.
+        user.Roles.Add(new UserRole { Role = "User" });
+
+        _db.Users.Add(user);
+        await _db.SaveChangesAsync();
+        return (true, null);
     }
 
     public async Task<bool> AddRoleAsync(int userId, string role)
@@ -139,7 +229,7 @@ public class DbUserRoleService : IUserRoleService
             .ToListAsync();
     }
 
-    public async Task<bool> CreateRoleDefinitionAsync(string name)
+    public async Task<bool> CreateRoleDefinitionAsync(string name, string? description = null)
     {
         name = name.Trim();
         if (string.IsNullOrWhiteSpace(name))
@@ -153,9 +243,26 @@ public class DbUserRoleService : IUserRoleService
             return false;
         }
 
-        _db.Roles.Add(new Role { Name = name, CreatedAtUtc = DateTime.UtcNow });
+        _db.Roles.Add(new Role
+        {
+            Name = name,
+            Description = string.IsNullOrWhiteSpace(description) ? null : description.Trim(),
+            CreatedAtUtc = DateTime.UtcNow,
+        });
         await _db.SaveChangesAsync();
         return true;
+    }
+
+    public async Task UpdateRoleDescriptionAsync(string name, string? description)
+    {
+        var role = await _db.Roles.FirstOrDefaultAsync(r => r.Name == name);
+        if (role is null)
+        {
+            return;
+        }
+
+        role.Description = string.IsNullOrWhiteSpace(description) ? null : description.Trim();
+        await _db.SaveChangesAsync();
     }
 
     public async Task<(bool Success, string? Error)> DeleteRoleDefinitionAsync(string name)

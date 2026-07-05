@@ -7,7 +7,7 @@
 
 <h1>Hantera användare &amp; roller</h1>
 
-<p>
+<p class="page-lede">
     Användare skapas automatiskt här första gången de loggar in med Google.
     Du kan lägga till eller ta bort roller nedan - ändringen gäller direkt
     (användaren märker det nästa gång de laddar en sida, eller loggar in igen).
@@ -15,80 +15,132 @@
     <a href="admin/roles">Hantera rolltyper</a> först, så dyker den upp i listan nedan.
 </p>
 
+<div class="card">
+    <h2 style="margin-top:0">Lägg till användare manuellt</h2>
+    <p class="page-lede">
+        Förbered en användare innan personen loggat in första gången, t.ex. för
+        att kunna tilldela roller i förväg. Loggar personen sedan in med Google
+        med samma e-postadress kopplas kontot ihop automatiskt.
+    </p>
+    <div class="add-role-form">
+        <input type="text"
+               placeholder="E-post"
+               @bind="_newUserEmail"
+               @bind:event="oninput"
+               @onkeyup="OnNewUserKeyUp" />
+        <input type="text"
+               placeholder="Namn (valfritt)"
+               @bind="_newUserName"
+               @bind:event="oninput"
+               @onkeyup="OnNewUserKeyUp" />
+        <button type="button" class="btn" @onclick="CreateUser">Lägg till användare</button>
+    </div>
+    @if (!string.IsNullOrEmpty(_message))
+    {
+        <p class="@(_messageIsError ? "form-error" : "form-success")">@_message</p>
+    }
+</div>
+
 @if (_users is null || _roleNames is null)
 {
-    <p><em>Laddar…</em></p>
+    <p class="empty-state">Laddar…</p>
 }
 else if (_users.Count == 0)
 {
-    <p><em>Inga användare har loggat in ännu.</em></p>
+    <div class="card">
+        <p class="empty-state">Inga användare har loggat in ännu.</p>
+    </div>
 }
 else
 {
-    <table class="table">
-        <thead>
-            <tr>
-                <th>E-post</th>
-                <th>Namn</th>
-                <th>Roller</th>
-                <th>Lägg till roll</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var user in _users)
-            {
+    <div class="card card-table">
+        <table class="table">
+            <thead>
                 <tr>
-                    <td>@user.Email</td>
-                    <td>@user.DisplayName</td>
-                    <td>
-                        @if (user.Roles.Count == 0)
-                        {
-                            <em>Inga roller</em>
-                        }
-                        else
-                        {
-                            @foreach (var role in user.Roles)
-                            {
-                                <span class="role-badge">
-                                    @role.Role
-                                    <button type="button"
-                                            class="role-remove"
-                                            title="Ta bort rollen @role.Role"
-                                            @onclick="() => RemoveRole(user.Id, role.Role)">
-                                        ✕
-                                    </button>
-                                </span>
-                            }
-                        }
-                    </td>
-                    <td class="add-role-cell">
-                        @if (_roleNames.Count == 0)
-                        {
-                            <em>Inga rolltyper finns</em>
-                        }
-                        else
-                        {
-                            <select @bind="_selectedRole[user.Id]">
-                                @foreach (var roleName in _roleNames)
-                                {
-                                    <option value="@roleName">@roleName</option>
-                                }
-                            </select>
-                            <button type="button" class="btn" @onclick="() => AddRole(user.Id)">
-                                Lägg till
-                            </button>
-                        }
-                    </td>
+                    <th></th>
+                    <th>E-post</th>
+                    <th>Namn</th>
+                    <th>Roller</th>
+                    <th>Lägg till roll</th>
                 </tr>
-            }
-        </tbody>
-    </table>
+            </thead>
+            <tbody>
+                @foreach (var user in _users)
+                {
+                    <tr>
+                        <td>
+                            @if (!string.IsNullOrEmpty(user.PictureUrl))
+                            {
+                                <img src="@user.PictureUrl" alt="" class="user-avatar-img" />
+                            }
+                            else
+                            {
+                                <span class="user-avatar user-avatar-sm">@GetInitials(user.DisplayName)</span>
+                            }
+                        </td>
+                        <td>
+                            @user.Email
+                            @if (string.IsNullOrEmpty(user.GoogleId))
+                            {
+                                <span class="empty-state" title="Har inte loggat in med Google än"> (ej inloggad än)</span>
+                            }
+                        </td>
+                        <td>@user.DisplayName</td>
+                        <td>
+                            @if (user.Roles.Count == 0)
+                            {
+                                <span class="empty-state">Inga roller</span>
+                            }
+                            else
+                            {
+                                @foreach (var role in user.Roles)
+                                {
+                                    <span class="role-badge">
+                                        @role.Role
+                                        <button type="button"
+                                                class="role-remove"
+                                                title="Ta bort rollen @role.Role"
+                                                @onclick="() => RemoveRole(user.Id, role.Role)">
+                                            ✕
+                                        </button>
+                                    </span>
+                                }
+                            }
+                        </td>
+                        <td class="add-role-cell">
+                            @if (_roleNames.Count == 0)
+                            {
+                                <span class="empty-state">Inga rolltyper finns</span>
+                            }
+                            else
+                            {
+                                <select @bind="_selectedRole[user.Id]">
+                                    @foreach (var roleName in _roleNames)
+                                    {
+                                        <option value="@roleName" title="@_roleDescriptions.GetValueOrDefault(roleName)">@roleName</option>
+                                    }
+                                </select>
+                                <button type="button" class="btn" @onclick="() => AddRole(user.Id)">
+                                    Lägg till
+                                </button>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
 }
 
 @code {
     private List<AppUser>? _users;
     private List<string>? _roleNames;
+    private readonly Dictionary<string, string?> _roleDescriptions = new();
     private readonly Dictionary<int, string> _selectedRole = new();
+    private string _newUserEmail = string.Empty;
+    private string _newUserName = string.Empty;
+    private string? _message;
+    private bool _messageIsError;
 
     protected override async Task OnInitializedAsync()
     {
@@ -105,11 +157,43 @@ else
     {
         var roleDefinitions = await UserRoleService.GetAllRoleDefinitionsAsync();
         _roleNames = roleDefinitions.Select(r => r.Name).ToList();
+        _roleDescriptions.Clear();
+        foreach (var role in roleDefinitions)
+        {
+            _roleDescriptions[role.Name] = role.Description;
+        }
 
         var defaultRole = _roleNames.FirstOrDefault() ?? "User";
         foreach (var user in _users ?? [])
         {
             _selectedRole.TryAdd(user.Id, defaultRole);
+        }
+    }
+
+    private async Task OnNewUserKeyUp(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await CreateUser();
+        }
+    }
+
+    private async Task CreateUser()
+    {
+        var (success, error) = await UserRoleService.CreateUserAsync(_newUserEmail, _newUserName);
+        if (success)
+        {
+            _message = $"Användaren \"{_newUserEmail.Trim()}\" skapades.";
+            _messageIsError = false;
+            _newUserEmail = string.Empty;
+            _newUserName = string.Empty;
+            await LoadUsersAsync();
+            await LoadRoleNamesAsync();
+        }
+        else
+        {
+            _message = error;
+            _messageIsError = true;
         }
     }
 
@@ -124,5 +208,21 @@ else
     {
         await UserRoleService.RemoveRoleAsync(userId, role);
         await LoadUsersAsync();
+    }
+
+    private static string GetInitials(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return "?";
+        }
+
+        var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length switch
+        {
+            0 => "?",
+            1 => parts[0][..1].ToUpperInvariant(),
+            _ => (parts[0][..1] + parts[^1][..1]).ToUpperInvariant()
+        };
     }
 }

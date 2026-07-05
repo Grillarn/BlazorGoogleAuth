@@ -3,18 +3,23 @@
 <PageTitle>Hem</PageTitle>
 
 <h1>Blazor + Google OAuth</h1>
+<p class="page-lede">En liten demoapp som visar Google-inloggning, roller och policybaserad åtkomstkontroll i Blazor.</p>
 
 <AuthorizeView>
     <Authorized>
-        <p>Välkommen, <strong>@context.User.Identity?.Name</strong>! Du är inloggad via Google.</p>
-        <p><a href="profile">Visa din profil och dina roller</a></p>
-        @if (context.User.IsInRole("Admin"))
-        {
-            <p>🔑 Du har rollen <strong>Admin</strong> – se <a href="admin">adminpanelen</a>.</p>
-        }
+        <div class="card">
+            <p>Välkommen, <strong>@context.User.Identity?.Name</strong>! Du är inloggad via Google.</p>
+            <p><a href="profile">Visa din profil och dina roller →</a></p>
+            @if (context.User.IsInRole("Admin"))
+            {
+                <p>🔑 Du har rollen <strong>Admin</strong> – se <a href="admin">adminpanelen</a>.</p>
+            }
+        </div>
     </Authorized>
     <NotAuthorized>
-        <p>Du är inte inloggad.</p>
-        <a class="btn btn-primary" href="login">Logga in med Google</a>
+        <div class="card">
+            <p>Du är inte inloggad.</p>
+            <a class="btn btn-primary" href="login">Logga in med Google</a>
+        </div>
     </NotAuthorized>
 </AuthorizeView>

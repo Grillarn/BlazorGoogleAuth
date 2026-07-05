@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "BlazorGoogleAuth",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--urls", "http://localhost:58395"],
+      "port": 58395
+    },
+    {
+      "name": "EkoWebApi",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "EkoWebApi", "--urls", "http://localhost:5066"],
+      "port": 5066
+    }
+  ]
+}

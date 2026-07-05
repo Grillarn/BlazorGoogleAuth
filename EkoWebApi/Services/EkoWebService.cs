@@ -1,0 +1,482 @@
+using Microsoft.EntityFrameworkCore;
+using EkoWebApi.Data;
+using EkoWebApi.Data.Entities;
+
+namespace EkoWebApi.Services;
+
+public interface IEkoWebService
+{
+    // --- Läs-uppslag (för dropdowns m.m.) ---
+    Task<List<Anvandare>> GetAnvandareAsync();
+    Task<List<Anvandarroll>> GetAnvandarrollerAsync();
+
+    // --- Institut ---
+    Task<List<Institut>> GetInstitutAsync();
+    Task<(bool Success, string? Error)> CreateInstitutAsync(string namn, string? beskrivning);
+    Task<(bool Success, string? Error)> UpdateInstitutAsync(int id, string namn, string? beskrivning);
+    Task<(bool Success, string? Error)> DeleteInstitutAsync(int id);
+
+    // --- Kontotyp ---
+    Task<List<Kontotyp>> GetKontotyperAsync();
+    Task<(bool Success, string? Error)> CreateKontotypAsync(string namn, bool externt);
+    Task<(bool Success, string? Error)> UpdateKontotypAsync(int id, string namn, bool externt);
+    Task<(bool Success, string? Error)> DeleteKontotypAsync(int id);
+
+    // --- Konto (inkl. koppling till användare via Konto_Anvadare) ---
+    /// <summary>
+    /// Hämtar konton. Om <paramref name="callerIsAdmin"/> är false filtreras
+    /// listan till bara de konton som <paramref name="callerExtId"/> (Anvandare.ExtId)
+    /// är kopplad till - så vanliga användare bara ser sina egna konton.
+    /// </summary>
+    Task<List<Konto>> GetKontonAsync(string? callerExtId, bool callerIsAdmin);
+    Task<(bool Success, string? Error)> CreateKontoAsync(string namn, string? kontoNr, string? beskrivning, int kontotypId, int institutId);
+    Task<(bool Success, string? Error)> UpdateKontoAsync(int id, string namn, string? kontoNr, string? beskrivning, int kontotypId, int institutId);
+    Task<(bool Success, string? Error)> DeleteKontoAsync(int id);
+    Task<(bool Success, string? Error)> AddKontoAnvandareAsync(int kontoId, int anvandareId, decimal andelProcent);
+    Task RemoveKontoAnvandareAsync(int linkId);
+
+    // --- Kategori ---
+    /// <summary>
+    /// Hämtar kategorier. Om <paramref name="callerIsAdmin"/> är false filtreras
+    /// listan till kategorier vars Ekonomi ägs av eller är delad med
+    /// <paramref name="callerExtId"/> - kategorier utan Ekonomi (globala) visas
+    /// aldrig för icke-admin.
+    /// </summary>
+    Task<List<Kategori>> GetKategorierAsync(string? callerExtId, bool callerIsAdmin);
+    Task<(bool Success, string? Error)> CreateKategoriAsync(string? namn, string? beskrivning, int? foralderId, int? ekonomiId);
+    Task<(bool Success, string? Error)> UpdateKategoriAsync(int id, string? namn, string? beskrivning, int? foralderId, int? ekonomiId);
+    Task<(bool Success, string? Error)> DeleteKategoriAsync(int id);
+
+    // --- Ekonomi (inkl. koppling till användare via Ekonomi_Anvandare) ---
+    /// <summary>
+    /// Hämtar ekonomier. Om <paramref name="callerIsAdmin"/> är false filtreras
+    /// listan till ekonomier där <paramref name="callerExtId"/> är ägare eller
+    /// kopplad via Ekonomi_Anvandare.
+    /// </summary>
+    Task<List<Ekonomi>> GetEkonomierAsync(string? callerExtId, bool callerIsAdmin);
+    Task<(bool Success, string? Error)> CreateEkonomiAsync(string namn, string? beskrivning, int ekonomiAgareId, int? transitKontoId);
+    Task<(bool Success, string? Error)> UpdateEkonomiAsync(int id, string namn, string? beskrivning, int ekonomiAgareId, int? transitKontoId);
+    Task<(bool Success, string? Error)> DeleteEkonomiAsync(int id);
+    Task<(bool Success, string? Error)> AddEkonomiAnvandareAsync(int ekonomiId, int anvandareId, int anvandarrollId, decimal andel);
+    Task RemoveEkonomiAnvandareAsync(int linkId);
+}
+
+public class EkoWebService : IEkoWebService
+{
+    private readonly EkoWebDbContext _db;
+
+    public EkoWebService(EkoWebDbContext db)
+    {
+        _db = db;
+    }
+
+    public async Task<List<Anvandare>> GetAnvandareAsync()
+        => await _db.Anvandare.OrderBy(a => a.Fornamn).ToListAsync();
+
+    public async Task<List<Anvandarroll>> GetAnvandarrollerAsync()
+        => await _db.Anvandarroller.OrderBy(r => r.Namn).ToListAsync();
+
+    // --- Institut ---
+
+    public async Task<List<Institut>> GetInstitutAsync()
+        => await _db.Institut.OrderBy(b => b.Namn).ToListAsync();
+
+    public async Task<(bool Success, string? Error)> CreateInstitutAsync(string namn, string? beskrivning)
+    {
+        namn = namn.Trim();
+        if (string.IsNullOrWhiteSpace(namn))
+        {
+            return (false, "Ange ett namn.");
+        }
+
+        _db.Institut.Add(new Institut { Namn = namn, Beskrivning = NullIfEmpty(beskrivning) });
+        await _db.SaveChangesAsync();
+        return (true, null);
+    }
+
+    public async Task<(bool Success, string? Error)> UpdateInstitutAsync(int id, string namn, string? beskrivning)
+    {
+        var institut = await _db.Institut.FindAsync(id);
+        if (institut is null)
+        {
+            return (false, "Institutet hittades inte.");
+        }
+
+        namn = namn.Trim();
+        if (string.IsNullOrWhiteSpace(namn))
+        {
+            return (false, "Ange ett namn.");
+        }
+
+        institut.Namn = namn;
+        institut.Beskrivning = NullIfEmpty(beskrivning);
+        await _db.SaveChangesAsync();
+        return (true, null);
+    }
+
+    public async Task<(bool Success, string? Error)> DeleteInstitutAsync(int id)
+    {
+        var institut = await _db.Institut.FindAsync(id);
+        if (institut is null)
+        {
+            return (false, "Institutet hittades inte.");
+        }
+
+        var inUse = await _db.Konton.AnyAsync(k => k.InstitutId == id);
+        if (inUse)
+        {
+            return (false, $"Institutet \"{institut.Namn}\" används av minst ett konto och kan inte tas bort.");
+        }
+
+        _db.Institut.Remove(institut);
+        await _db.SaveChangesAsync();
+        return (true, null);
+    }
+
+    // --- Kontotyp ---
+
+    public async Task<List<Kontotyp>> GetKontotyperAsync()
+        => await _db.Kontotyper.OrderBy(k => k.Namn).ToListAsync();
+
+    public async Task<(bool Success, string? Error)> CreateKontotypAsync(string namn, bool externt)
+    {
+        namn = namn.Trim();
+        if (string.IsNullOrWhiteSpace(namn))
+        {
+            return (false, "Ange ett namn.");
+        }
+
+        _db.Kontotyper.Add(new Kontotyp { Namn = namn, Externt = externt });
+        await _db.SaveChangesAsync();
+        return (true, null);
+    }
+
+    public async Task<(bool Success, string? Error)> UpdateKontotypAsync(int id, string namn, bool externt)
+    {
+        var kontotyp = await _db.Kontotyper.FindAsync(id);
+        if (kontotyp is null)
+        {
+            return (false, "Kontotypen hittades inte.");
+        }
+
+        namn = namn.Trim();
+        if (string.IsNullOrWhiteSpace(namn))
+        {
+            return (false, "Ange ett namn.");
+        }
+
+        kontotyp.Namn = namn;
+        kontotyp.Externt = externt;
+        await _db.SaveChangesAsync();
+        return (true, null);
+    }
+
+    public async Task<(bool Success, string? Error)> DeleteKontotypAsync(int id)
+    {
+        var kontotyp = await _db.Kontotyper.FindAsync(id);
+        if (kontotyp is null)
+        {
+            return (false, "Kontotypen hittades inte.");
+        }
+
+        var inUse = await _db.Konton.AnyAsync(k => k.KontotypId == id);
+        if (inUse)
+        {
+            return (false, $"Kontotypen \"{kontotyp.Namn}\" används av minst ett konto och kan inte tas bort.");
+        }
+
+        _db.Kontotyper.Remove(kontotyp);
+        await _db.SaveChangesAsync();
+        return (true, null);
+    }
+
+    // --- Konto ---
+
+    public async Task<List<Konto>> GetKontonAsync(string? callerExtId, bool callerIsAdmin)
+    {
+        var query = _db.Konton
+            .Include(k => k.Kontotyp)
+            .Include(k => k.Institut)
+            .Include(k => k.Anvandare).ThenInclude(ka => ka.Anvandare)
+            .AsQueryable();
+
+        if (!callerIsAdmin)
+        {
+            // Notera: om callerExtId är null/tom matchar villkoret inget
+            // (ExtId är aldrig null/tom i databasen) - dvs. "neka som standard"
+            // istället för att av misstag visa alla konton.
+            query = query.Where(k => k.Anvandare.Any(ka => ka.Anvandare.ExtId == callerExtId));
+        }
+
+        return await query.OrderBy(k => k.Namn).ToListAsync();
+    }
+
+    public async Task<(bool Success, string? Error)> CreateKontoAsync(string namn, string? kontoNr, string? beskrivning, int kontotypId, int institutId)
+    {
+        namn = namn.Trim();
+        if (string.IsNullOrWhiteSpace(namn))
+        {
+            return (false, "Ange ett namn.");
+        }
+
+        _db.Konton.Add(new Konto
+        {
+            Namn = namn,
+            KontoNr = NullIfEmpty(kontoNr),
+            Beskrivning = NullIfEmpty(beskrivning),
+            KontotypId = kontotypId,
+            InstitutId = institutId,
+        });
+        await _db.SaveChangesAsync();
+        return (true, null);
+    }
+
+    public async Task<(bool Success, string? Error)> UpdateKontoAsync(int id, string namn, string? kontoNr, string? beskrivning, int kontotypId, int institutId)
+    {
+        var konto = await _db.Konton.FindAsync(id);
+        if (konto is null)
+        {
+            return (false, "Kontot hittades inte.");
+        }
+
+        namn = namn.Trim();
+        if (string.IsNullOrWhiteSpace(namn))
+        {
+            return (false, "Ange ett namn.");
+        }
+
+        konto.Namn = namn;
+        konto.KontoNr = NullIfEmpty(kontoNr);
+        konto.Beskrivning = NullIfEmpty(beskrivning);
+        konto.KontotypId = kontotypId;
+        konto.InstitutId = institutId;
+        await _db.SaveChangesAsync();
+        return (true, null);
+    }
+
+    public async Task<(bool Success, string? Error)> DeleteKontoAsync(int id)
+    {
+        var konto = await _db.Konton.FindAsync(id);
+        if (konto is null)
+        {
+            return (false, "Kontot hittades inte.");
+        }
+
+        var harKopplingar = await _db.KontoAnvandare.AnyAsync(ka => ka.KontoId == id);
+        if (harKopplingar)
+        {
+            return (false, $"Kontot \"{konto.Namn}\" har kopplade användare och kan inte tas bort. Ta bort kopplingarna först.");
+        }
+
+        _db.Konton.Remove(konto);
+        await _db.SaveChangesAsync();
+        return (true, null);
+    }
+
+    public async Task<(bool Success, string? Error)> AddKontoAnvandareAsync(int kontoId, int anvandareId, decimal andelProcent)
+    {
+        var alreadyLinked = await _db.KontoAnvandare.AnyAsync(ka => ka.KontoId == kontoId && ka.AnvandareId == anvandareId);
+        if (alreadyLinked)
+        {
+            return (false, "Den här användaren är redan kopplad till kontot.");
+        }
+
+        _db.KontoAnvandare.Add(new KontoAnvandare { KontoId = kontoId, AnvandareId = anvandareId, AndelProcent = andelProcent });
+        await _db.SaveChangesAsync();
+        return (true, null);
+    }
+
+    public async Task RemoveKontoAnvandareAsync(int linkId)
+    {
+        var link = await _db.KontoAnvandare.FindAsync(linkId);
+        if (link is not null)
+        {
+            _db.KontoAnvandare.Remove(link);
+            await _db.SaveChangesAsync();
+        }
+    }
+
+    // --- Kategori ---
+
+    public async Task<List<Kategori>> GetKategorierAsync(string? callerExtId, bool callerIsAdmin)
+    {
+        var query = _db.Kategorier
+            .Include(k => k.Foralder)
+            .Include(k => k.Ekonomi)
+            .AsQueryable();
+
+        if (!callerIsAdmin)
+        {
+            query = query.Where(k => k.EkonomiId != null &&
+                (k.Ekonomi!.EkonomiAgare.ExtId == callerExtId ||
+                 k.Ekonomi!.Anvandare.Any(ea => ea.Anvandare.ExtId == callerExtId)));
+        }
+
+        return await query.OrderBy(k => k.Namn).ToListAsync();
+    }
+
+    public async Task<(bool Success, string? Error)> CreateKategoriAsync(string? namn, string? beskrivning, int? foralderId, int? ekonomiId)
+    {
+        _db.Kategorier.Add(new Kategori
+        {
+            Namn = NullIfEmpty(namn),
+            Beskrivning = NullIfEmpty(beskrivning),
+            ForalderId = foralderId,
+            EkonomiId = ekonomiId,
+        });
+        await _db.SaveChangesAsync();
+        return (true, null);
+    }
+
+    public async Task<(bool Success, string? Error)> UpdateKategoriAsync(int id, string? namn, string? beskrivning, int? foralderId, int? ekonomiId)
+    {
+        var kategori = await _db.Kategorier.FindAsync(id);
+        if (kategori is null)
+        {
+            return (false, "Kategorin hittades inte.");
+        }
+
+        if (foralderId == id)
+        {
+            return (false, "En kategori kan inte vara sin egen förälder.");
+        }
+
+        kategori.Namn = NullIfEmpty(namn);
+        kategori.Beskrivning = NullIfEmpty(beskrivning);
+        kategori.ForalderId = foralderId;
+        kategori.EkonomiId = ekonomiId;
+        await _db.SaveChangesAsync();
+        return (true, null);
+    }
+
+    public async Task<(bool Success, string? Error)> DeleteKategoriAsync(int id)
+    {
+        var kategori = await _db.Kategorier.FindAsync(id);
+        if (kategori is null)
+        {
+            return (false, "Kategorin hittades inte.");
+        }
+
+        var harUnderkategorier = await _db.Kategorier.AnyAsync(k => k.ForalderId == id);
+        if (harUnderkategorier)
+        {
+            return (false, $"Kategorin \"{kategori.Namn}\" har underkategorier och kan inte tas bort.");
+        }
+
+        _db.Kategorier.Remove(kategori);
+        await _db.SaveChangesAsync();
+        return (true, null);
+    }
+
+    // --- Ekonomi ---
+
+    public async Task<List<Ekonomi>> GetEkonomierAsync(string? callerExtId, bool callerIsAdmin)
+    {
+        var query = _db.Ekonomier
+            .Include(e => e.EkonomiAgare)
+            .Include(e => e.Anvandare).ThenInclude(ea => ea.Anvandare)
+            .Include(e => e.Anvandare).ThenInclude(ea => ea.Anvandarroll)
+            .AsQueryable();
+
+        if (!callerIsAdmin)
+        {
+            query = query.Where(e => e.EkonomiAgare.ExtId == callerExtId ||
+                e.Anvandare.Any(ea => ea.Anvandare.ExtId == callerExtId));
+        }
+
+        return await query.OrderBy(e => e.Namn).ToListAsync();
+    }
+
+    public async Task<(bool Success, string? Error)> CreateEkonomiAsync(string namn, string? beskrivning, int ekonomiAgareId, int? transitKontoId)
+    {
+        namn = namn.Trim();
+        if (string.IsNullOrWhiteSpace(namn))
+        {
+            return (false, "Ange ett namn.");
+        }
+
+        _db.Ekonomier.Add(new Ekonomi
+        {
+            Namn = namn,
+            Beskrivning = NullIfEmpty(beskrivning),
+            EkonomiAgareId = ekonomiAgareId,
+            TransitKontoId = transitKontoId,
+        });
+        await _db.SaveChangesAsync();
+        return (true, null);
+    }
+
+    public async Task<(bool Success, string? Error)> UpdateEkonomiAsync(int id, string namn, string? beskrivning, int ekonomiAgareId, int? transitKontoId)
+    {
+        var ekonomi = await _db.Ekonomier.FindAsync(id);
+        if (ekonomi is null)
+        {
+            return (false, "Ekonomin hittades inte.");
+        }
+
+        namn = namn.Trim();
+        if (string.IsNullOrWhiteSpace(namn))
+        {
+            return (false, "Ange ett namn.");
+        }
+
+        ekonomi.Namn = namn;
+        ekonomi.Beskrivning = NullIfEmpty(beskrivning);
+        ekonomi.EkonomiAgareId = ekonomiAgareId;
+        ekonomi.TransitKontoId = transitKontoId;
+        await _db.SaveChangesAsync();
+        return (true, null);
+    }
+
+    public async Task<(bool Success, string? Error)> DeleteEkonomiAsync(int id)
+    {
+        var ekonomi = await _db.Ekonomier.FindAsync(id);
+        if (ekonomi is null)
+        {
+            return (false, "Ekonomin hittades inte.");
+        }
+
+        var harKopplingar = await _db.EkonomiAnvandare.AnyAsync(ea => ea.EkonomiId == id);
+        var harKategorier = await _db.Kategorier.AnyAsync(k => k.EkonomiId == id);
+        if (harKopplingar || harKategorier)
+        {
+            return (false, $"Ekonomin \"{ekonomi.Namn}\" har kopplade användare eller kategorier och kan inte tas bort.");
+        }
+
+        _db.Ekonomier.Remove(ekonomi);
+        await _db.SaveChangesAsync();
+        return (true, null);
+    }
+
+    public async Task<(bool Success, string? Error)> AddEkonomiAnvandareAsync(int ekonomiId, int anvandareId, int anvandarrollId, decimal andel)
+    {
+        var alreadyLinked = await _db.EkonomiAnvandare.AnyAsync(ea => ea.EkonomiId == ekonomiId && ea.AnvadareId == anvandareId);
+        if (alreadyLinked)
+        {
+            return (false, "Den här användaren är redan kopplad till ekonomin.");
+        }
+
+        _db.EkonomiAnvandare.Add(new EkonomiAnvandare
+        {
+            EkonomiId = ekonomiId,
+            AnvadareId = anvandareId,
+            AnvandarrollId = anvandarrollId,
+            Andel = andel,
+        });
+        await _db.SaveChangesAsync();
+        return (true, null);
+    }
+
+    public async Task RemoveEkonomiAnvandareAsync(int linkId)
+    {
+        var link = await _db.EkonomiAnvandare.FindAsync(linkId);
+        if (link is not null)
+        {
+            _db.EkonomiAnvandare.Remove(link);
+            await _db.SaveChangesAsync();
+        }
+    }
+
+    private static string? NullIfEmpty(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+}

@@ -16,4 +16,13 @@
     </PackageReference>
   </ItemGroup>
 
+  <!-- EkoWebApi är ett eget, separat projekt som råkar ligga i en undermapp
+       här - exkludera det så SDK:ns default-glob inte plockar upp dess filer. -->
+  <ItemGroup>
+    <Compile Remove="EkoWebApi\**" />
+    <Content Remove="EkoWebApi\**" />
+    <EmbeddedResource Remove="EkoWebApi\**" />
+    <None Remove="EkoWebApi\**" />
+  </ItemGroup>
+
 </Project>
