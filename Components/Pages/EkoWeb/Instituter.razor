@@ -1,0 +1,148 @@
+@page "/ekoweb/institut"
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject IEkoWebService EkoWebService
+
+<PageTitle>Institut</PageTitle>
+
+<h1>Institut</h1>
+<p class="page-lede">Instituten som konton kan kopplas till under <a href="ekoweb/konton">Konton</a>.</p>
+
+<div class="card">
+    <div class="add-role-form">
+        <input type="text" placeholder="Namn" @bind="_namn" @bind:event="oninput" />
+        <input type="text" placeholder="Beskrivning (valfritt)" @bind="_beskrivning" @bind:event="oninput" />
+        <button type="button" class="btn" @onclick="Create">Lägg till institut</button>
+    </div>
+    @if (!string.IsNullOrEmpty(_message))
+    {
+        <p class="@(_messageIsError ? "form-error" : "form-success")">@_message</p>
+    }
+</div>
+
+@if (_loadError is not null)
+{
+    <div class="card"><p class="form-error">@_loadError</p></div>
+}
+else if (_institut is null)
+{
+    <p class="empty-state">Laddar…</p>
+}
+else if (_institut.Count == 0)
+{
+    <div class="card"><p class="empty-state">Inga institut finns.</p></div>
+}
+else
+{
+    <div class="card card-table">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Namn</th>
+                    <th>Beskrivning</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var institut in _institut)
+                {
+                    <tr>
+                        @if (_editingId == institut.Id)
+                        {
+                            <td><input type="text" @bind="_editNamn" /></td>
+                            <td><input type="text" @bind="_editBeskrivning" /></td>
+                            <td>
+                                <button type="button" class="btn" @onclick="() => SaveEdit(institut.Id)">Spara</button>
+                                <button type="button" class="btn-delete-role" @onclick="CancelEdit">Avbryt</button>
+                            </td>
+                        }
+                        else
+                        {
+                            <td>@institut.Namn</td>
+                            <td>@institut.Beskrivning</td>
+                            <td>
+                                <button type="button" class="btn-delete-role" @onclick="() => StartEdit(institut)">Redigera</button>
+                                <button type="button" class="btn-delete-role" @onclick="() => Delete(institut.Id)">Ta bort</button>
+                            </td>
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private List<Institut>? _institut;
+    private string? _loadError;
+    private string _namn = string.Empty;
+    private string _beskrivning = string.Empty;
+    private string? _message;
+    private bool _messageIsError;
+
+    private int? _editingId;
+    private string _editNamn = string.Empty;
+    private string _editBeskrivning = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await Load();
+        }
+        catch (HttpRequestException)
+        {
+            _loadError = "Kunde inte nå EkoWebApi. Kontrollera att det körs (se README).";
+        }
+    }
+
+    private async Task Load()
+    {
+        _institut = await EkoWebService.GetInstitutAsync();
+    }
+
+    private async Task Create()
+    {
+        var (success, error) = await EkoWebService.CreateInstitutAsync(_namn, _beskrivning);
+        _message = success ? $"Institutet \"{_namn.Trim()}\" skapades." : error;
+        _messageIsError = !success;
+        if (success)
+        {
+            _namn = string.Empty;
+            _beskrivning = string.Empty;
+            await Load();
+        }
+    }
+
+    private void StartEdit(Institut institut)
+    {
+        _editingId = institut.Id;
+        _editNamn = institut.Namn;
+        _editBeskrivning = institut.Beskrivning ?? string.Empty;
+    }
+
+    private void CancelEdit()
+    {
+        _editingId = null;
+    }
+
+    private async Task SaveEdit(int id)
+    {
+        var (success, error) = await EkoWebService.UpdateInstitutAsync(id, _editNamn, _editBeskrivning);
+        _message = success ? "Institutet uppdaterades." : error;
+        _messageIsError = !success;
+        if (success)
+        {
+            _editingId = null;
+            await Load();
+        }
+    }
+
+    private async Task Delete(int id)
+    {
+        var (success, error) = await EkoWebService.DeleteInstitutAsync(id);
+        _message = success ? "Institutet togs bort." : error;
+        _messageIsError = !success;
+        await Load();
+    }
+}

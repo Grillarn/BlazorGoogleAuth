@@ -42,8 +42,21 @@ public class RoleClaimsTransformation : IClaimsTransformation
             return principal;
         }
 
+        // Google mappar en del claims via standard-URN:erna i ClaimTypes,
+        // men skickar vissa (t.ex. "picture") kvar under sina råa OIDC-namn -
+        // så vi kollar båda varianterna istället för att anta en specifik.
         var displayName = identity.FindFirst(ClaimTypes.Name)?.Value;
-        var roles = await _userRoleService.GetOrProvisionRolesAsync(email, displayName);
+        var googleId = identity.FindFirst(ClaimTypes.NameIdentifier)?.Value
+            ?? identity.FindFirst("sub")?.Value;
+        var givenName = identity.FindFirst(ClaimTypes.GivenName)?.Value
+            ?? identity.FindFirst("given_name")?.Value;
+        var surname = identity.FindFirst(ClaimTypes.Surname)?.Value
+            ?? identity.FindFirst("family_name")?.Value;
+        var pictureUrl = identity.FindFirst("picture")?.Value
+            ?? identity.FindFirst("urn:google:picture")?.Value;
+
+        var profile = new GoogleProfile(email, displayName, googleId, givenName, surname, pictureUrl);
+        var roles = await _userRoleService.GetOrProvisionRolesAsync(profile);
 
         foreach (var role in roles)
         {

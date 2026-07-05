@@ -7,64 +7,82 @@
 
 <h1>Hantera rolltyper</h1>
 
-<p>
+<p class="page-lede">
     Här skapar du nya rolltyper (t.ex. <code>Support</code> eller <code>Ekonomi</code>)
     som sedan kan tilldelas användare under
     <a href="admin/users">Hantera användare &amp; roller</a>. Grundrollerna
     <code>User</code>, <code>Editor</code> och <code>Admin</code> finns redan.
 </p>
 
-<div class="add-role-form">
-    <input type="text"
-           placeholder="Ny rolltyp, t.ex. Support"
-           @bind="_newRoleName"
-           @bind:event="oninput"
-           @onkeyup="OnKeyUp" />
-    <button type="button" class="btn" @onclick="CreateRole">Skapa rolltyp</button>
-</div>
+<div class="card">
+    <div class="add-role-form">
+        <input type="text"
+               placeholder="Ny rolltyp, t.ex. Support"
+               @bind="_newRoleName"
+               @bind:event="oninput"
+               @onkeyup="OnKeyUp" />
+        <input type="text"
+               placeholder="Beskrivning (valfritt)"
+               @bind="_newRoleDescription"
+               @bind:event="oninput"
+               @onkeyup="OnKeyUp" />
+        <button type="button" class="btn" @onclick="CreateRole">Skapa rolltyp</button>
+    </div>
 
-@if (!string.IsNullOrEmpty(_message))
-{
-    <p class="@(_messageIsError ? "form-error" : "form-success")">@_message</p>
-}
+    @if (!string.IsNullOrEmpty(_message))
+    {
+        <p class="@(_messageIsError ? "form-error" : "form-success")">@_message</p>
+    }
+</div>
 
 @if (_roles is null)
 {
-    <p><em>Laddar…</em></p>
+    <p class="empty-state">Laddar…</p>
 }
 else
 {
-    <table class="table">
-        <thead>
-            <tr>
-                <th>Rolltyp</th>
-                <th>Skapad</th>
-                <th></th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var role in _roles)
-            {
+    <div class="card card-table">
+        <table class="table">
+            <thead>
                 <tr>
-                    <td>@role.Name</td>
-                    <td>@role.CreatedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
-                    <td>
-                        <button type="button"
-                                class="role-remove"
-                                title="Ta bort rolltypen"
-                                @onclick="() => DeleteRole(role.Name)">
-                            Ta bort
-                        </button>
-                    </td>
+                    <th>Rolltyp</th>
+                    <th>Beskrivning</th>
+                    <th>Skapad</th>
+                    <th></th>
                 </tr>
-            }
-        </tbody>
-    </table>
+            </thead>
+            <tbody>
+                @foreach (var role in _roles)
+                {
+                    <tr>
+                        <td>@role.Name</td>
+                        <td>
+                            <input type="text"
+                                   placeholder="Ingen beskrivning"
+                                   value="@_descriptionDrafts.GetValueOrDefault(role.Name, string.Empty)"
+                                   @onchange="e => SaveDescription(role.Name, e.Value?.ToString() ?? string.Empty)" />
+                        </td>
+                        <td>@role.CreatedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
+                        <td>
+                            <button type="button"
+                                    class="btn-delete-role"
+                                    title="Ta bort rolltypen"
+                                    @onclick="() => DeleteRole(role.Name)">
+                                Ta bort
+                            </button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
 }
 
 @code {
     private List<Role>? _roles;
     private string _newRoleName = string.Empty;
+    private string _newRoleDescription = string.Empty;
+    private readonly Dictionary<string, string> _descriptionDrafts = new();
     private string? _message;
     private bool _messageIsError;
 
@@ -76,6 +94,11 @@ else
     private async Task LoadRolesAsync()
     {
         _roles = await UserRoleService.GetAllRoleDefinitionsAsync();
+        _descriptionDrafts.Clear();
+        foreach (var role in _roles)
+        {
+            _descriptionDrafts[role.Name] = role.Description ?? string.Empty;
+        }
     }
 
     private async Task OnKeyUp(KeyboardEventArgs e)
@@ -96,12 +119,13 @@ else
             return;
         }
 
-        var created = await UserRoleService.CreateRoleDefinitionAsync(name);
+        var created = await UserRoleService.CreateRoleDefinitionAsync(name, _newRoleDescription);
         if (created)
         {
             _message = $"Rolltypen \"{name}\" skapades.";
             _messageIsError = false;
             _newRoleName = string.Empty;
+            _newRoleDescription = string.Empty;
             await LoadRolesAsync();
         }
         else
@@ -109,6 +133,14 @@ else
             _message = $"Rolltypen \"{name}\" finns redan.";
             _messageIsError = true;
         }
+    }
+
+    private async Task SaveDescription(string roleName, string description)
+    {
+        _descriptionDrafts[roleName] = description;
+        await UserRoleService.UpdateRoleDescriptionAsync(roleName, description);
+        _message = $"Beskrivningen för \"{roleName}\" sparades.";
+        _messageIsError = false;
     }
 
     private async Task DeleteRole(string name)

@@ -1,0 +1,286 @@
+@page "/ekoweb/ekonomier"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject IEkoWebService EkoWebService
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Ekonomier</PageTitle>
+
+<h1>Ekonomier</h1>
+@if (_isAdmin)
+{
+    <p class="page-lede">
+        En ekonomi ägs av en användare och kan delas med fler användare (med roll och andel) via
+        kopplingstabellen Ekonomi_Anvandare.
+    </p>
+}
+else
+{
+    <p class="page-lede">Ekonomier du äger eller är kopplad till.</p>
+}
+
+@if (_isAdmin)
+{
+    <div class="card">
+        <h2 style="margin-top:0">Lägg till ekonomi</h2>
+        <div class="add-role-form" style="flex-wrap:wrap">
+            <input type="text" placeholder="Namn" @bind="_namn" @bind:event="oninput" />
+            <input type="text" placeholder="Beskrivning (valfritt)" @bind="_beskrivning" @bind:event="oninput" />
+            <select @bind="_ekonomiAgareId">
+                <option value="0" disabled>Välj ägare</option>
+                @foreach (var a in _anvandare ?? [])
+                {
+                    <option value="@a.Id">@a.Fornamn @a.Efternamn</option>
+                }
+            </select>
+            <select @bind="_transitKontoId">
+                <option value="">Inget transitkonto</option>
+                @foreach (var k in _konton ?? [])
+                {
+                    <option value="@k.Id">@k.Namn</option>
+                }
+            </select>
+            <button type="button" class="btn" @onclick="Create">Lägg till ekonomi</button>
+        </div>
+        @if (!string.IsNullOrEmpty(_message))
+        {
+            <p class="@(_messageIsError ? "form-error" : "form-success")">@_message</p>
+        }
+    </div>
+}
+
+@if (_loadError is not null)
+{
+    <div class="card"><p class="form-error">@_loadError</p></div>
+}
+else if (_ekonomier is null)
+{
+    <p class="empty-state">Laddar…</p>
+}
+else if (_ekonomier.Count == 0)
+{
+    <div class="card"><p class="empty-state">Inga ekonomier hittades.</p></div>
+}
+else
+{
+    <div class="card card-table">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Namn</th>
+                    <th>Ägare</th>
+                    <th>Transitkonto</th>
+                    <th>Delad med</th>
+                    @if (_isAdmin)
+                    {
+                        <th></th>
+                    }
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var ekonomi in _ekonomier)
+                {
+                    <tr>
+                        @if (_isAdmin && _editingId == ekonomi.Id)
+                        {
+                            <td><input type="text" @bind="_editNamn" /></td>
+                            <td>
+                                <select @bind="_editEkonomiAgareId">
+                                    @foreach (var a in _anvandare ?? [])
+                                    {
+                                        <option value="@a.Id">@a.Fornamn @a.Efternamn</option>
+                                    }
+                                </select>
+                            </td>
+                            <td>
+                                <select @bind="_editTransitKontoId">
+                                    <option value="">Inget transitkonto</option>
+                                    @foreach (var k in _konton ?? [])
+                                    {
+                                        <option value="@k.Id">@k.Namn</option>
+                                    }
+                                </select>
+                            </td>
+                            <td colspan="2">
+                                <button type="button" class="btn" @onclick="() => SaveEdit(ekonomi.Id)">Spara</button>
+                                <button type="button" class="btn-delete-role" @onclick="CancelEdit">Avbryt</button>
+                            </td>
+                        }
+                        else
+                        {
+                            <td>@ekonomi.Namn</td>
+                            <td>@ekonomi.EkonomiAgare.Fornamn @ekonomi.EkonomiAgare.Efternamn</td>
+                            <td>@(_konton?.FirstOrDefault(k => k.Id == ekonomi.TransitKontoId)?.Namn)</td>
+                            <td>
+                                @foreach (var link in ekonomi.Anvandare)
+                                {
+                                    <span class="role-badge">
+                                        @link.Anvandare.Fornamn @link.Anvandare.Efternamn (@link.Anvandarroll.Namn, @link.Andel%)
+                                        @if (_isAdmin)
+                                        {
+                                            <button type="button" class="role-remove" title="Ta bort kopplingen" @onclick="() => RemoveAnvandare(link.Id)">✕</button>
+                                        }
+                                    </span>
+                                }
+                                @if (_isAdmin)
+                                {
+                                    <div class="add-role-cell" style="margin-top:0.4rem">
+                                        <select @bind="_selectedAnvandare[ekonomi.Id]">
+                                            @foreach (var a in _anvandare ?? [])
+                                            {
+                                                <option value="@a.Id">@a.Fornamn @a.Efternamn</option>
+                                            }
+                                        </select>
+                                        <select @bind="_selectedRoll[ekonomi.Id]">
+                                            @foreach (var r in _roller ?? [])
+                                            {
+                                                <option value="@r.Id">@r.Namn</option>
+                                            }
+                                        </select>
+                                        <input type="number" min="0" max="100" step="1" style="width:70px" @bind="_andelInput[ekonomi.Id]" />
+                                        <button type="button" class="btn" @onclick="() => AddAnvandare(ekonomi.Id)">Koppla</button>
+                                    </div>
+                                }
+                            </td>
+                            @if (_isAdmin)
+                            {
+                                <td>
+                                    <button type="button" class="btn-delete-role" @onclick="() => StartEdit(ekonomi)">Redigera</button>
+                                    <button type="button" class="btn-delete-role" @onclick="() => Delete(ekonomi.Id)">Ta bort</button>
+                                </td>
+                            }
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private bool _isAdmin;
+    private List<Ekonomi>? _ekonomier;
+    private List<Anvandare>? _anvandare;
+    private List<Anvandarroll>? _roller;
+    private List<Konto>? _konton;
+    private string? _loadError;
+    private readonly Dictionary<int, int> _selectedAnvandare = new();
+    private readonly Dictionary<int, int> _selectedRoll = new();
+    private readonly Dictionary<int, decimal> _andelInput = new();
+
+    private string _namn = string.Empty;
+    private string _beskrivning = string.Empty;
+    private int _ekonomiAgareId;
+    private string _transitKontoId = string.Empty;
+    private string? _message;
+    private bool _messageIsError;
+
+    private int? _editingId;
+    private string _editNamn = string.Empty;
+    private int _editEkonomiAgareId;
+    private string _editTransitKontoId = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        _isAdmin = authState.User.IsInRole("Admin");
+
+        try
+        {
+            if (_isAdmin)
+            {
+                _anvandare = await EkoWebService.GetAnvandareAsync();
+                _roller = await EkoWebService.GetAnvandarrollerAsync();
+                _konton = await EkoWebService.GetKontonAsync();
+            }
+
+            await Load();
+        }
+        catch (HttpRequestException)
+        {
+            _loadError = "Kunde inte nå EkoWebApi. Kontrollera att det körs (se README).";
+        }
+    }
+
+    private async Task Load()
+    {
+        _ekonomier = await EkoWebService.GetEkonomierAsync();
+        foreach (var ekonomi in _ekonomier)
+        {
+            _selectedAnvandare.TryAdd(ekonomi.Id, _anvandare?.FirstOrDefault()?.Id ?? 0);
+            _selectedRoll.TryAdd(ekonomi.Id, _roller?.FirstOrDefault()?.Id ?? 0);
+            _andelInput.TryAdd(ekonomi.Id, 100);
+        }
+    }
+
+    private static int? ParseId(string value) => int.TryParse(value, out var id) ? id : null;
+
+    private async Task Create()
+    {
+        if (_ekonomiAgareId == 0)
+        {
+            _message = "Välj en ägare.";
+            _messageIsError = true;
+            return;
+        }
+
+        var (success, error) = await EkoWebService.CreateEkonomiAsync(_namn, _beskrivning, _ekonomiAgareId, ParseId(_transitKontoId));
+        _message = success ? $"Ekonomin \"{_namn.Trim()}\" skapades." : error;
+        _messageIsError = !success;
+        if (success)
+        {
+            _namn = string.Empty;
+            _beskrivning = string.Empty;
+            _transitKontoId = string.Empty;
+            await Load();
+        }
+    }
+
+    private void StartEdit(Ekonomi ekonomi)
+    {
+        _editingId = ekonomi.Id;
+        _editNamn = ekonomi.Namn;
+        _editEkonomiAgareId = ekonomi.EkonomiAgareId;
+        _editTransitKontoId = ekonomi.TransitKontoId?.ToString() ?? string.Empty;
+    }
+
+    private void CancelEdit() => _editingId = null;
+
+    private async Task SaveEdit(int id)
+    {
+        var ekonomi = _ekonomier?.First(e => e.Id == id);
+        var (success, error) = await EkoWebService.UpdateEkonomiAsync(id, _editNamn, ekonomi?.Beskrivning, _editEkonomiAgareId, ParseId(_editTransitKontoId));
+        _message = success ? "Ekonomin uppdaterades." : error;
+        _messageIsError = !success;
+        if (success)
+        {
+            _editingId = null;
+            await Load();
+        }
+    }
+
+    private async Task Delete(int id)
+    {
+        var (success, error) = await EkoWebService.DeleteEkonomiAsync(id);
+        _message = success ? "Ekonomin togs bort." : error;
+        _messageIsError = !success;
+        await Load();
+    }
+
+    private async Task AddAnvandare(int ekonomiId)
+    {
+        var anvandareId = _selectedAnvandare.GetValueOrDefault(ekonomiId);
+        var rollId = _selectedRoll.GetValueOrDefault(ekonomiId);
+        var andel = _andelInput.GetValueOrDefault(ekonomiId);
+        var (success, error) = await EkoWebService.AddEkonomiAnvandareAsync(ekonomiId, anvandareId, rollId, andel);
+        _message = success ? "Användaren kopplades till ekonomin." : error;
+        _messageIsError = !success;
+        await Load();
+    }
+
+    private async Task RemoveAnvandare(int linkId)
+    {
+        await EkoWebService.RemoveEkonomiAnvandareAsync(linkId);
+        await Load();
+    }
+}

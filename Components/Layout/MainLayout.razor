@@ -1,4 +1,5 @@
 @inherits LayoutComponentBase
+@inject IUserRoleService UserRoleService
 
 <div class="page">
     <div class="sidebar">
@@ -9,19 +10,76 @@
         <div class="top-row px-4">
             <AuthorizeView>
                 <Authorized>
-                    <span class="me">Inloggad som <strong>@context.User.Identity?.Name</strong></span>
+                    @if (IsRealAdmin(context.User))
+                    {
+                        <form method="post" action="/admin/view-as" class="view-as-form">
+                            <label class="view-as-label">
+                                Kör som
+                                <select name="role">
+                                    @foreach (var roleName in _roleNames)
+                                    {
+                                        <option value="@roleName" selected="@(roleName == CurrentRole(context.User))">@roleName</option>
+                                    }
+                                </select>
+                            </label>
+                            <button type="submit" class="btn-link">Byt</button>
+                        </form>
+                        @if (!context.User.IsInRole("Admin"))
+                        {
+                            <span class="view-as-badge">Visar som @CurrentRole(context.User)</span>
+                            <form method="post" action="/admin/view-as/reset">
+                                <button type="submit" class="btn-link view-as-reset">↩ Tillbaka till Admin</button>
+                            </form>
+                        }
+                    }
+                    <div class="user-chip">
+                        <span class="user-avatar">@GetInitials(context.User.Identity?.Name)</span>
+                        <span class="me">Inloggad som <strong>@context.User.Identity?.Name</strong></span>
+                    </div>
                     <form method="post" action="/logout">
                         <button type="submit" class="btn-link">Logga ut</button>
                     </form>
                 </Authorized>
                 <NotAuthorized>
-                    <a href="login">Logga in med Google</a>
+                    <a class="btn" href="login">Logga in med Google</a>
                 </NotAuthorized>
             </AuthorizeView>
         </div>
 
-        <article class="content px-4">
+        <article class="content">
             @Body
         </article>
     </main>
 </div>
+
+@code {
+    private List<string> _roleNames = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var roles = await UserRoleService.GetAllRoleDefinitionsAsync();
+        _roleNames = roles.Select(r => r.Name).ToList();
+    }
+
+    private static bool IsRealAdmin(System.Security.Claims.ClaimsPrincipal user)
+        => user.IsInRole("Admin") || user.HasClaim(ViewAsClaimTypes.RealAdmin, "true");
+
+    private static string? CurrentRole(System.Security.Claims.ClaimsPrincipal user)
+        => user.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+
+    private static string GetInitials(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return "?";
+        }
+
+        var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length switch
+        {
+            0 => "?",
+            1 => parts[0][..1].ToUpperInvariant(),
+            _ => (parts[0][..1] + parts[^1][..1]).ToUpperInvariant()
+        };
+    }
+}

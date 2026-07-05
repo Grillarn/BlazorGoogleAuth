@@ -20,6 +20,15 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<AppUser>(entity =>
         {
             entity.HasIndex(u => u.Email).IsUnique();
+
+            // Måste ha en begränsad längd för att kunna indexeras i SQL Server
+            // (nvarchar(max) kan inte vara nyckelkolumn i ett index).
+            entity.Property(u => u.GoogleId).HasMaxLength(200);
+
+            // Tillåter många NULL (t.ex. manuellt skapade användare som inte
+            // loggat in än) men förhindrar att samma Google-konto kopplas
+            // till två rader.
+            entity.HasIndex(u => u.GoogleId).IsUnique().HasFilter("[GoogleId] IS NOT NULL");
         });
 
         modelBuilder.Entity<UserRole>(entity =>

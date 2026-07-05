@@ -5,14 +5,16 @@
 
 <h1>Adminpanel</h1>
 
-<p>
-    Den här sidan är bara synlig för användare med rollen <code>Admin</code>.
-    Om en icke-admin försöker gå hit direkt via URL:en skickas de till
-    <code>/access-denied</code> istället.
-</p>
+<div class="card">
+    <p>
+        Den här sidan är bara synlig för användare med rollen <code>Admin</code>.
+        Om en icke-admin försöker gå hit direkt via URL:en skickas de till
+        <code>/access-denied</code> istället.
+    </p>
 
-<AuthorizeView Context="authContext">
-    <Authorized>
-        <p>Inloggad som admin: <strong>@authContext.User.Identity?.Name</strong></p>
-    </Authorized>
-</AuthorizeView>
+    <AuthorizeView Context="authContext">
+        <Authorized>
+            <p>Inloggad som admin: <strong>@authContext.User.Identity?.Name</strong></p>
+        </Authorized>
+    </AuthorizeView>
+</div>

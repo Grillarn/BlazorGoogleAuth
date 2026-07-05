@@ -48,6 +48,31 @@ dotnet run
 Öppna URL:en som skrivs ut i terminalen (t.ex. `https://localhost:7160`).
 Kontrollera att den matchar den redirect URI du angav i Google Cloud Console.
 
+### EkoWeb-sidorna kräver att EkoWebApi också körs
+
+Sidorna under "Ekonomi (EkoWeb)" (`/ekoweb/...`) pratar inte längre direkt med
+EkoWeb-databasen - de går via ett separat API-projekt, **EkoWebApi**, som måste
+köras samtidigt. Om EkoWebApi inte är igång visar sidorna ett tydligt felmeddelande
+istället för att fastna på "Laddar…".
+
+Kör båda projekten samtidigt, t.ex. i två terminalfönster:
+
+```bash
+# Terminal 1
+dotnet run --project EkoWebApi
+
+# Terminal 2
+cd BlazorGoogleAuth
+dotnet run
+```
+
+I Visual Studio: högerklicka på solutionen → **Set Startup Projects...** →
+**Multiple startup projects** → sätt **Action = Start** för både
+`BlazorGoogleAuth` och `EkoWebApi`.
+
+Se även [EkoWebApi/appsettings.json](EkoWebApi/appsettings.json) (ConnectionStrings:EkoWeb)
+och user-secrets `ApiKey` (måste matcha `EkoWebApi:ApiKey` i BlazorGoogleAuths user-secrets).
+
 ## 4. Testa flödet
 
 1. Klicka **Logga in med Google** på startsidan.
@@ -229,5 +254,7 @@ De skickas till `/access-denied` (konfigurerat i `Program.cs` via
 - **redirect_uri_mismatch**: redirect-URI:n i Google Cloud Console matchar inte
   exakt (inklusive port och `https`/`http`) den som appen faktiskt använder.
 - **400: invalid_client**: fel Client ID/Secret, eller inte sparat med User Secrets korrekt.
+- **EkoWeb-sidorna fastnar på "Laddar…" eller visar "Kunde inte nå EkoWebApi"**:
+  EkoWebApi-projektet körs inte. Se avsnittet om EkoWebApi under punkt 3 ovan.
 - Om du kör bakom en proxy/reverse proxy (t.ex. i produktion), lägg till
   `app.UseForwardedHeaders()` så att callback-URL:en byggs korrekt.

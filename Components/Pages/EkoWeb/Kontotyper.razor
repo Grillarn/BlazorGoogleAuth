@@ -1,0 +1,150 @@
+@page "/ekoweb/kontotyper"
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject IEkoWebService EkoWebService
+
+<PageTitle>Kontotyper</PageTitle>
+
+<h1>Kontotyper</h1>
+<p class="page-lede">Kontotyperna som konton kan kopplas till under <a href="ekoweb/konton">Konton</a>. "Externt" markerar kontotyper som inte är egna konton (t.ex. arbetsgivare, betalningsmottagare).</p>
+
+<div class="card">
+    <div class="add-role-form">
+        <input type="text" placeholder="Namn" @bind="_namn" @bind:event="oninput" />
+        <label style="display:flex;align-items:center;gap:0.35rem;">
+            <input type="checkbox" @bind="_externt" /> Externt
+        </label>
+        <button type="button" class="btn" @onclick="Create">Lägg till kontotyp</button>
+    </div>
+    @if (!string.IsNullOrEmpty(_message))
+    {
+        <p class="@(_messageIsError ? "form-error" : "form-success")">@_message</p>
+    }
+</div>
+
+@if (_loadError is not null)
+{
+    <div class="card"><p class="form-error">@_loadError</p></div>
+}
+else if (_kontotyper is null)
+{
+    <p class="empty-state">Laddar…</p>
+}
+else if (_kontotyper.Count == 0)
+{
+    <div class="card"><p class="empty-state">Inga kontotyper finns.</p></div>
+}
+else
+{
+    <div class="card card-table">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Namn</th>
+                    <th>Externt</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var kontotyp in _kontotyper)
+                {
+                    <tr>
+                        @if (_editingId == kontotyp.Id)
+                        {
+                            <td><input type="text" @bind="_editNamn" /></td>
+                            <td><input type="checkbox" @bind="_editExternt" /></td>
+                            <td>
+                                <button type="button" class="btn" @onclick="() => SaveEdit(kontotyp.Id)">Spara</button>
+                                <button type="button" class="btn-delete-role" @onclick="CancelEdit">Avbryt</button>
+                            </td>
+                        }
+                        else
+                        {
+                            <td>@kontotyp.Namn</td>
+                            <td>@(kontotyp.Externt ? "Ja" : "Nej")</td>
+                            <td>
+                                <button type="button" class="btn-delete-role" @onclick="() => StartEdit(kontotyp)">Redigera</button>
+                                <button type="button" class="btn-delete-role" @onclick="() => Delete(kontotyp.Id)">Ta bort</button>
+                            </td>
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private List<Kontotyp>? _kontotyper;
+    private string? _loadError;
+    private string _namn = string.Empty;
+    private bool _externt;
+    private string? _message;
+    private bool _messageIsError;
+
+    private int? _editingId;
+    private string _editNamn = string.Empty;
+    private bool _editExternt;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await Load();
+        }
+        catch (HttpRequestException)
+        {
+            _loadError = "Kunde inte nå EkoWebApi. Kontrollera att det körs (se README).";
+        }
+    }
+
+    private async Task Load()
+    {
+        _kontotyper = await EkoWebService.GetKontotyperAsync();
+    }
+
+    private async Task Create()
+    {
+        var (success, error) = await EkoWebService.CreateKontotypAsync(_namn, _externt);
+        _message = success ? $"Kontotypen \"{_namn.Trim()}\" skapades." : error;
+        _messageIsError = !success;
+        if (success)
+        {
+            _namn = string.Empty;
+            _externt = false;
+            await Load();
+        }
+    }
+
+    private void StartEdit(Kontotyp kontotyp)
+    {
+        _editingId = kontotyp.Id;
+        _editNamn = kontotyp.Namn;
+        _editExternt = kontotyp.Externt;
+    }
+
+    private void CancelEdit()
+    {
+        _editingId = null;
+    }
+
+    private async Task SaveEdit(int id)
+    {
+        var (success, error) = await EkoWebService.UpdateKontotypAsync(id, _editNamn, _editExternt);
+        _message = success ? "Kontotypen uppdaterades." : error;
+        _messageIsError = !success;
+        if (success)
+        {
+            _editingId = null;
+            await Load();
+        }
+    }
+
+    private async Task Delete(int id)
+    {
+        var (success, error) = await EkoWebService.DeleteKontotypAsync(id);
+        _message = success ? "Kontotypen togs bort." : error;
+        _messageIsError = !success;
+        await Load();
+    }
+}

@@ -1,0 +1,243 @@
+@page "/ekoweb/kategorier"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject IEkoWebService EkoWebService
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Kategorier</PageTitle>
+
+<h1>Kategorier</h1>
+@if (_isAdmin)
+{
+    <p class="page-lede">
+        Kategorier kan ha en föräldrakategori (för att bygga en hierarki) och kan valfritt kopplas till en
+        <a href="ekoweb/ekonomier">ekonomi</a>.
+    </p>
+}
+else
+{
+    <p class="page-lede">Kategorier kopplade till ekonomier du är del av.</p>
+}
+
+@if (_isAdmin)
+{
+    <div class="card">
+        <h2 style="margin-top:0">Lägg till kategori</h2>
+        <div class="add-role-form" style="flex-wrap:wrap">
+            <input type="text" placeholder="Namn" @bind="_namn" @bind:event="oninput" />
+            <input type="text" placeholder="Beskrivning (valfritt)" @bind="_beskrivning" @bind:event="oninput" />
+            <select @bind="_foralderId">
+                <option value="">Ingen förälder</option>
+                @foreach (var k in _kategorier ?? [])
+                {
+                    <option value="@k.Id">@k.Namn</option>
+                }
+            </select>
+            <select @bind="_ekonomiId">
+                <option value="">Ingen ekonomi</option>
+                @foreach (var e in _ekonomier ?? [])
+                {
+                    <option value="@e.Id">@e.Namn</option>
+                }
+            </select>
+            <button type="button" class="btn" @onclick="Create">Lägg till kategori</button>
+        </div>
+        @if (!string.IsNullOrEmpty(_message))
+        {
+            <p class="@(_messageIsError ? "form-error" : "form-success")">@_message</p>
+        }
+    </div>
+}
+
+<div class="card">
+    <input type="text" placeholder="Sök kategori…" @bind="_filter" @bind:event="oninput" style="min-width:280px" />
+</div>
+
+@if (_loadError is not null)
+{
+    <div class="card"><p class="form-error">@_loadError</p></div>
+}
+else if (_kategorier is null)
+{
+    <p class="empty-state">Laddar…</p>
+}
+else if (_kategorier.Count == 0)
+{
+    <div class="card"><p class="empty-state">Inga kategorier hittades.</p></div>
+}
+else
+{
+    <div class="card card-table">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Namn</th>
+                    <th>Förälder</th>
+                    <th>Ekonomi</th>
+                    <th>Beskrivning</th>
+                    @if (_isAdmin)
+                    {
+                        <th></th>
+                    }
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var kategori in FilteredKategorier())
+                {
+                    <tr>
+                        @if (_isAdmin && _editingId == kategori.Id)
+                        {
+                            <td><input type="text" @bind="_editNamn" /></td>
+                            <td>
+                                <select @bind="_editForalderId">
+                                    <option value="">Ingen förälder</option>
+                                    @foreach (var k in (_kategorier ?? []).Where(k => k.Id != kategori.Id))
+                                    {
+                                        <option value="@k.Id">@k.Namn</option>
+                                    }
+                                </select>
+                            </td>
+                            <td>
+                                <select @bind="_editEkonomiId">
+                                    <option value="">Ingen ekonomi</option>
+                                    @foreach (var e in _ekonomier ?? [])
+                                    {
+                                        <option value="@e.Id">@e.Namn</option>
+                                    }
+                                </select>
+                            </td>
+                            <td><input type="text" @bind="_editBeskrivning" /></td>
+                            <td>
+                                <button type="button" class="btn" @onclick="() => SaveEdit(kategori.Id)">Spara</button>
+                                <button type="button" class="btn-delete-role" @onclick="CancelEdit">Avbryt</button>
+                            </td>
+                        }
+                        else
+                        {
+                            <td>@kategori.Namn</td>
+                            <td>@kategori.Foralder?.Namn</td>
+                            <td>@kategori.Ekonomi?.Namn</td>
+                            <td>@kategori.Beskrivning</td>
+                            @if (_isAdmin)
+                            {
+                                <td>
+                                    <button type="button" class="btn-delete-role" @onclick="() => StartEdit(kategori)">Redigera</button>
+                                    <button type="button" class="btn-delete-role" @onclick="() => Delete(kategori.Id)">Ta bort</button>
+                                </td>
+                            }
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private bool _isAdmin;
+    private List<Kategori>? _kategorier;
+    private List<Ekonomi>? _ekonomier;
+    private string? _loadError;
+
+    private string _namn = string.Empty;
+    private string _beskrivning = string.Empty;
+    private string _foralderId = string.Empty;
+    private string _ekonomiId = string.Empty;
+    private string _filter = string.Empty;
+    private string? _message;
+    private bool _messageIsError;
+
+    private int? _editingId;
+    private string _editNamn = string.Empty;
+    private string _editBeskrivning = string.Empty;
+    private string _editForalderId = string.Empty;
+    private string _editEkonomiId = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        _isAdmin = authState.User.IsInRole("Admin");
+
+        try
+        {
+            if (_isAdmin)
+            {
+                _ekonomier = await EkoWebService.GetEkonomierAsync();
+            }
+
+            await Load();
+        }
+        catch (HttpRequestException)
+        {
+            _loadError = "Kunde inte nå EkoWebApi. Kontrollera att det körs (se README).";
+        }
+    }
+
+    private async Task Load()
+    {
+        _kategorier = await EkoWebService.GetKategorierAsync();
+    }
+
+    private IEnumerable<Kategori> FilteredKategorier()
+    {
+        if (_kategorier is null)
+        {
+            return [];
+        }
+
+        if (string.IsNullOrWhiteSpace(_filter))
+        {
+            return _kategorier;
+        }
+
+        return _kategorier.Where(k => k.Namn is not null && k.Namn.Contains(_filter, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static int? ParseId(string value) => int.TryParse(value, out var id) ? id : null;
+
+    private async Task Create()
+    {
+        var (success, error) = await EkoWebService.CreateKategoriAsync(_namn, _beskrivning, ParseId(_foralderId), ParseId(_ekonomiId));
+        _message = success ? $"Kategorin \"{_namn.Trim()}\" skapades." : error;
+        _messageIsError = !success;
+        if (success)
+        {
+            _namn = string.Empty;
+            _beskrivning = string.Empty;
+            _foralderId = string.Empty;
+            _ekonomiId = string.Empty;
+            await Load();
+        }
+    }
+
+    private void StartEdit(Kategori kategori)
+    {
+        _editingId = kategori.Id;
+        _editNamn = kategori.Namn ?? string.Empty;
+        _editBeskrivning = kategori.Beskrivning ?? string.Empty;
+        _editForalderId = kategori.ForalderId?.ToString() ?? string.Empty;
+        _editEkonomiId = kategori.EkonomiId?.ToString() ?? string.Empty;
+    }
+
+    private void CancelEdit() => _editingId = null;
+
+    private async Task SaveEdit(int id)
+    {
+        var (success, error) = await EkoWebService.UpdateKategoriAsync(id, _editNamn, _editBeskrivning, ParseId(_editForalderId), ParseId(_editEkonomiId));
+        _message = success ? "Kategorin uppdaterades." : error;
+        _messageIsError = !success;
+        if (success)
+        {
+            _editingId = null;
+            await Load();
+        }
+    }
+
+    private async Task Delete(int id)
+    {
+        var (success, error) = await EkoWebService.DeleteKategoriAsync(id);
+        _message = success ? "Kategorin togs bort." : error;
+        _messageIsError = !success;
+        await Load();
+    }
+}
