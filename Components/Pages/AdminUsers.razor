@@ -1,0 +1,128 @@
+@page "/admin/users"
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject IUserRoleService UserRoleService
+
+<PageTitle>Hantera användare</PageTitle>
+
+<h1>Hantera användare &amp; roller</h1>
+
+<p>
+    Användare skapas automatiskt här första gången de loggar in med Google.
+    Du kan lägga till eller ta bort roller nedan - ändringen gäller direkt
+    (användaren märker det nästa gång de laddar en sida, eller loggar in igen).
+    Vill du skapa en helt ny rolltyp (t.ex. <code>Support</code>)? Gör det under
+    <a href="admin/roles">Hantera rolltyper</a> först, så dyker den upp i listan nedan.
+</p>
+
+@if (_users is null || _roleNames is null)
+{
+    <p><em>Laddar…</em></p>
+}
+else if (_users.Count == 0)
+{
+    <p><em>Inga användare har loggat in ännu.</em></p>
+}
+else
+{
+    <table class="table">
+        <thead>
+            <tr>
+                <th>E-post</th>
+                <th>Namn</th>
+                <th>Roller</th>
+                <th>Lägg till roll</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var user in _users)
+            {
+                <tr>
+                    <td>@user.Email</td>
+                    <td>@user.DisplayName</td>
+                    <td>
+                        @if (user.Roles.Count == 0)
+                        {
+                            <em>Inga roller</em>
+                        }
+                        else
+                        {
+                            @foreach (var role in user.Roles)
+                            {
+                                <span class="role-badge">
+                                    @role.Role
+                                    <button type="button"
+                                            class="role-remove"
+                                            title="Ta bort rollen @role.Role"
+                                            @onclick="() => RemoveRole(user.Id, role.Role)">
+                                        ✕
+                                    </button>
+                                </span>
+                            }
+                        }
+                    </td>
+                    <td class="add-role-cell">
+                        @if (_roleNames.Count == 0)
+                        {
+                            <em>Inga rolltyper finns</em>
+                        }
+                        else
+                        {
+                            <select @bind="_selectedRole[user.Id]">
+                                @foreach (var roleName in _roleNames)
+                                {
+                                    <option value="@roleName">@roleName</option>
+                                }
+                            </select>
+                            <button type="button" class="btn" @onclick="() => AddRole(user.Id)">
+                                Lägg till
+                            </button>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private List<AppUser>? _users;
+    private List<string>? _roleNames;
+    private readonly Dictionary<int, string> _selectedRole = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadUsersAsync();
+        await LoadRoleNamesAsync();
+    }
+
+    private async Task LoadUsersAsync()
+    {
+        _users = await UserRoleService.GetAllUsersAsync();
+    }
+
+    private async Task LoadRoleNamesAsync()
+    {
+        var roleDefinitions = await UserRoleService.GetAllRoleDefinitionsAsync();
+        _roleNames = roleDefinitions.Select(r => r.Name).ToList();
+
+        var defaultRole = _roleNames.FirstOrDefault() ?? "User";
+        foreach (var user in _users ?? [])
+        {
+            _selectedRole.TryAdd(user.Id, defaultRole);
+        }
+    }
+
+    private async Task AddRole(int userId)
+    {
+        var role = _selectedRole.GetValueOrDefault(userId, _roleNames?.FirstOrDefault() ?? "User");
+        await UserRoleService.AddRoleAsync(userId, role);
+        await LoadUsersAsync();
+    }
+
+    private async Task RemoveRole(int userId, string role)
+    {
+        await UserRoleService.RemoveRoleAsync(userId, role);
+        await LoadUsersAsync();
+    }
+}

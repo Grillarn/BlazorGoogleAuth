@@ -1,0 +1,121 @@
+@page "/admin/roles"
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject IUserRoleService UserRoleService
+
+<PageTitle>Hantera rolltyper</PageTitle>
+
+<h1>Hantera rolltyper</h1>
+
+<p>
+    Här skapar du nya rolltyper (t.ex. <code>Support</code> eller <code>Ekonomi</code>)
+    som sedan kan tilldelas användare under
+    <a href="admin/users">Hantera användare &amp; roller</a>. Grundrollerna
+    <code>User</code>, <code>Editor</code> och <code>Admin</code> finns redan.
+</p>
+
+<div class="add-role-form">
+    <input type="text"
+           placeholder="Ny rolltyp, t.ex. Support"
+           @bind="_newRoleName"
+           @bind:event="oninput"
+           @onkeyup="OnKeyUp" />
+    <button type="button" class="btn" @onclick="CreateRole">Skapa rolltyp</button>
+</div>
+
+@if (!string.IsNullOrEmpty(_message))
+{
+    <p class="@(_messageIsError ? "form-error" : "form-success")">@_message</p>
+}
+
+@if (_roles is null)
+{
+    <p><em>Laddar…</em></p>
+}
+else
+{
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Rolltyp</th>
+                <th>Skapad</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var role in _roles)
+            {
+                <tr>
+                    <td>@role.Name</td>
+                    <td>@role.CreatedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
+                    <td>
+                        <button type="button"
+                                class="role-remove"
+                                title="Ta bort rolltypen"
+                                @onclick="() => DeleteRole(role.Name)">
+                            Ta bort
+                        </button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private List<Role>? _roles;
+    private string _newRoleName = string.Empty;
+    private string? _message;
+    private bool _messageIsError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadRolesAsync();
+    }
+
+    private async Task LoadRolesAsync()
+    {
+        _roles = await UserRoleService.GetAllRoleDefinitionsAsync();
+    }
+
+    private async Task OnKeyUp(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await CreateRole();
+        }
+    }
+
+    private async Task CreateRole()
+    {
+        var name = _newRoleName.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            _message = "Ange ett namn för rolltypen.";
+            _messageIsError = true;
+            return;
+        }
+
+        var created = await UserRoleService.CreateRoleDefinitionAsync(name);
+        if (created)
+        {
+            _message = $"Rolltypen \"{name}\" skapades.";
+            _messageIsError = false;
+            _newRoleName = string.Empty;
+            await LoadRolesAsync();
+        }
+        else
+        {
+            _message = $"Rolltypen \"{name}\" finns redan.";
+            _messageIsError = true;
+        }
+    }
+
+    private async Task DeleteRole(string name)
+    {
+        var (success, error) = await UserRoleService.DeleteRoleDefinitionAsync(name);
+        _message = success ? $"Rolltypen \"{name}\" togs bort." : error;
+        _messageIsError = !success;
+        await LoadRolesAsync();
+    }
+}

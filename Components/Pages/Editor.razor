@@ -1,0 +1,11 @@
+@page "/editor"
+@attribute [Authorize(Policy = "RequireEditorOrAdmin")]
+
+<PageTitle>Redigera innehåll</PageTitle>
+
+<h1>Redigera innehåll</h1>
+
+<p>
+    Den här sidan kräver policyn <code>RequireEditorOrAdmin</code>,
+    dvs. rollen <code>Editor</code> <em>eller</em> <code>Admin</code>.
+</p>

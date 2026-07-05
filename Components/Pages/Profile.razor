@@ -1,0 +1,41 @@
+@page "/profile"
+@attribute [Authorize]
+
+<PageTitle>Min profil</PageTitle>
+
+<h1>Min profil</h1>
+
+<AuthorizeView>
+    <Authorized>
+        <h2>Roller</h2>
+        <p>
+            @{
+                var roles = context.User.Claims
+                    .Where(c => c.Type == System.Security.Claims.ClaimTypes.Role)
+                    .Select(c => c.Value)
+                    .ToList();
+            }
+            @if (roles.Count > 0)
+            {
+                @string.Join(", ", roles)
+            }
+            else
+            {
+                <em>Inga roller tilldelade</em>
+            }
+        </p>
+
+        <h2>Alla claims</h2>
+        <table class="table">
+            <tbody>
+                @foreach (var claim in context.User.Claims)
+                {
+                    <tr>
+                        <td>@claim.Type.Split('/').Last()</td>
+                        <td>@claim.Value</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </Authorized>
+</AuthorizeView>
