@@ -9,10 +9,10 @@
     <Authorized>
         <div class="card">
             <p>Välkommen, <strong>@context.User.Identity?.Name</strong>! Du är inloggad via Google.</p>
-            <p><a href="profile">Visa din profil och dina roller →</a></p>
+            <p><a href="profile">Visa din profil och dina roller</a></p>
             @if (context.User.IsInRole("Admin"))
             {
-                <p>🔑 Du har rollen <strong>Admin</strong> – se <a href="admin">adminpanelen</a>.</p>
+                <p>Du har rollen <strong>Admin</strong> – se <a href="admin">adminpanelen</a>.</p>
             }
         </div>
     </Authorized>

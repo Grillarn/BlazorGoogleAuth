@@ -93,3 +93,36 @@ public class Ekonomi
     public int? TransitKontoId { get; set; }
     public List<EkonomiAnvandare> Anvandare { get; set; } = [];
 }
+
+public class SenastePeriod
+{
+    public int Ar { get; set; }
+    public int Manad { get; set; }
+}
+
+/// <summary>Matchar API:ets wrapper-objekt (se SenastePeriodResponse i EkoWebApi).</summary>
+public class SenastePeriodResponse
+{
+    public SenastePeriod? Period { get; set; }
+}
+
+public class Transaktion
+{
+    public int Id { get; set; }
+    public DateOnly Datum { get; set; }
+    public int Ar { get; set; }
+    public int Manad { get; set; }
+    public int FranKontoId { get; set; }
+    public NamedRef FranKonto { get; set; } = null!;
+    public int TillKontoId { get; set; }
+    public NamedRef TillKonto { get; set; } = null!;
+    public int KategoriId { get; set; }
+    public NamedRef Kategori { get; set; } = null!;
+    public int EkonomiId { get; set; }
+    public NamedRef Ekonomi { get; set; } = null!;
+    public int AnvandareId { get; set; }
+    public Anvandare Anvandare { get; set; } = null!;
+    public decimal Belopp { get; set; }
+    public bool Aterkommande { get; set; }
+    public string? Kommentar { get; set; }
+}

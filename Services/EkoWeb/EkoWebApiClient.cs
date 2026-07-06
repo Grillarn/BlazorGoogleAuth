@@ -43,6 +43,15 @@ public interface IEkoWebService
     Task<(bool Success, string? Error)> DeleteEkonomiAsync(int id);
     Task<(bool Success, string? Error)> AddEkonomiAnvandareAsync(int ekonomiId, int anvandareId, int anvandarrollId, decimal andel);
     Task RemoveEkonomiAnvandareAsync(int linkId);
+
+    // --- Transaktion ---
+    Task<List<Transaktion>> GetTransaktionerAsync(int? ar, int? manad);
+    Task<List<int>> GetTransaktionArAsync();
+    Task<List<int>> GetTransaktionManaderAsync(int ar);
+    Task<SenastePeriod?> GetSenasteTransaktionsperiodAsync();
+    Task<(bool Success, string? Error)> CreateTransaktionAsync(DateOnly datum, int franKontoId, int tillKontoId, int kategoriId, int ekonomiId, int? anvandareId, decimal belopp, bool aterkommande, string? kommentar);
+    Task<(bool Success, string? Error)> UpdateTransaktionAsync(int id, DateOnly datum, int franKontoId, int tillKontoId, int kategoriId, int ekonomiId, int anvandareId, decimal belopp, bool aterkommande, string? kommentar);
+    Task<(bool Success, string? Error)> DeleteTransaktionAsync(int id);
 }
 
 /// <summary>
@@ -237,5 +246,54 @@ public class EkoWebApiClient : IEkoWebService
     {
         await SetCallerHeadersAsync();
         await _http.DeleteAsync($"api/ekonomier/anvandare/{linkId}");
+    }
+
+    // --- Transaktion ---
+
+    public async Task<List<Transaktion>> GetTransaktionerAsync(int? ar, int? manad)
+    {
+        await SetCallerHeadersAsync();
+        var query = new List<string>();
+        if (ar.HasValue) query.Add($"ar={ar.Value}");
+        if (manad.HasValue) query.Add($"manad={manad.Value}");
+        var url = "api/transaktioner" + (query.Count > 0 ? "?" + string.Join("&", query) : "");
+        return await _http.GetFromJsonAsync<List<Transaktion>>(url) ?? [];
+    }
+
+    public async Task<List<int>> GetTransaktionArAsync()
+    {
+        await SetCallerHeadersAsync();
+        return await _http.GetFromJsonAsync<List<int>>("api/transaktioner/ar") ?? [];
+    }
+
+    public async Task<List<int>> GetTransaktionManaderAsync(int ar)
+    {
+        await SetCallerHeadersAsync();
+        return await _http.GetFromJsonAsync<List<int>>($"api/transaktioner/manader?ar={ar}") ?? [];
+    }
+
+    public async Task<SenastePeriod?> GetSenasteTransaktionsperiodAsync()
+    {
+        await SetCallerHeadersAsync();
+        var response = await _http.GetFromJsonAsync<SenastePeriodResponse>("api/transaktioner/senaste-period");
+        return response?.Period;
+    }
+
+    public async Task<(bool Success, string? Error)> CreateTransaktionAsync(DateOnly datum, int franKontoId, int tillKontoId, int kategoriId, int ekonomiId, int? anvandareId, decimal belopp, bool aterkommande, string? kommentar)
+    {
+        await SetCallerHeadersAsync();
+        return await ToResult(await _http.PostAsJsonAsync("api/transaktioner", new { Datum = datum, FranKontoId = franKontoId, TillKontoId = tillKontoId, KategoriId = kategoriId, EkonomiId = ekonomiId, AnvandareId = anvandareId, Belopp = belopp, Aterkommande = aterkommande, Kommentar = kommentar }));
+    }
+
+    public async Task<(bool Success, string? Error)> UpdateTransaktionAsync(int id, DateOnly datum, int franKontoId, int tillKontoId, int kategoriId, int ekonomiId, int anvandareId, decimal belopp, bool aterkommande, string? kommentar)
+    {
+        await SetCallerHeadersAsync();
+        return await ToResult(await _http.PutAsJsonAsync($"api/transaktioner/{id}", new { Datum = datum, FranKontoId = franKontoId, TillKontoId = tillKontoId, KategoriId = kategoriId, EkonomiId = ekonomiId, AnvandareId = (int?)anvandareId, Belopp = belopp, Aterkommande = aterkommande, Kommentar = kommentar }));
+    }
+
+    public async Task<(bool Success, string? Error)> DeleteTransaktionAsync(int id)
+    {
+        await SetCallerHeadersAsync();
+        return await ToResult(await _http.DeleteAsync($"api/transaktioner/{id}"));
     }
 }
