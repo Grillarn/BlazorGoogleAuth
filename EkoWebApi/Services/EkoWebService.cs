@@ -59,6 +59,44 @@ public interface IEkoWebService
     Task<(bool Success, string? Error)> DeleteEkonomiAsync(int id);
     Task<(bool Success, string? Error)> AddEkonomiAnvandareAsync(int ekonomiId, int anvandareId, int anvandarrollId, decimal andel);
     Task RemoveEkonomiAnvandareAsync(int linkId);
+
+    // --- Transaktion ---
+    /// <summary>
+    /// Hämtar transaktioner, valfritt filtrerat på år/månad. Om
+    /// <paramref name="callerIsAdmin"/> är false filtreras listan till
+    /// transaktioner vars Ekonomi ägs av eller är delad med <paramref name="callerExtId"/>.
+    /// </summary>
+    Task<List<Transaktion>> GetTransaktionerAsync(string? callerExtId, bool callerIsAdmin, int? ar, int? manad);
+
+    /// <summary>Vilka år som har minst en transaktion (för år-väljaren), inom samma behörighetsscope.</summary>
+    Task<List<int>> GetTransaktionArAsync(string? callerExtId, bool callerIsAdmin);
+
+    /// <summary>Vilka månader ett givet år som har minst en transaktion (för månad-väljaren), inom samma behörighetsscope.</summary>
+    Task<List<int>> GetTransaktionManaderAsync(string? callerExtId, bool callerIsAdmin, int ar);
+
+    /// <summary>
+    /// Den senaste år/månad-perioden som har minst en transaktion, inom samma
+    /// behörighetsscope. Null om det inte finns några transaktioner alls.
+    /// Används för att föreslå "nästa period" när man ska fylla i nya transaktioner.
+    /// </summary>
+    Task<(int Ar, int Manad)?> GetSenasteTransaktionsperiodAsync(string? callerExtId, bool callerIsAdmin);
+
+    /// <summary>
+    /// Skapar en transaktion. Om <paramref name="callerIsAdmin"/> är false måste
+    /// anroparen ha tillgång till <paramref name="ekonomiId"/> (ägare eller delad),
+    /// och användaren sätts alltid till anroparens egen Anvandare (kan inte
+    /// registrera transaktioner "som" någon annan).
+    /// </summary>
+    Task<(bool Success, string? Error)> CreateTransaktionAsync(
+        DateOnly datum, int franKontoId, int tillKontoId, int kategoriId, int ekonomiId,
+        int? anvandareId, decimal belopp, bool aterkommande, string? kommentar,
+        string? callerExtId, bool callerIsAdmin);
+
+    Task<(bool Success, string? Error)> UpdateTransaktionAsync(
+        int id, DateOnly datum, int franKontoId, int tillKontoId, int kategoriId, int ekonomiId,
+        int anvandareId, decimal belopp, bool aterkommande, string? kommentar);
+
+    Task<(bool Success, string? Error)> DeleteTransaktionAsync(int id);
 }
 
 public class EkoWebService : IEkoWebService
@@ -202,10 +240,13 @@ public class EkoWebService : IEkoWebService
 
         if (!callerIsAdmin)
         {
-            // Notera: om callerExtId är null/tom matchar villkoret inget
-            // (ExtId är aldrig null/tom i databasen) - dvs. "neka som standard"
-            // istället för att av misstag visa alla konton.
-            query = query.Where(k => k.Anvandare.Any(ka => ka.Anvandare.ExtId == callerExtId));
+            // Notera: om callerExtId är null/tom matchar det första villkoret
+            // inget (ExtId är aldrig null/tom i databasen) - dvs. "neka som
+            // standard" istället för att av misstag visa alla konton.
+            // Externa konton (arbetsgivare, betalningsmottagare m.m.) är inte
+            // kopplade till någon specifik person och visas alltid, eftersom
+            // man annars inte skulle kunna registrera en transaktion mot dem.
+            query = query.Where(k => k.Anvandare.Any(ka => ka.Anvandare.ExtId == callerExtId) || k.Kontotyp.Externt);
         }
 
         return await query.OrderBy(k => k.Namn).ToListAsync();
@@ -475,6 +516,183 @@ public class EkoWebService : IEkoWebService
             _db.EkonomiAnvandare.Remove(link);
             await _db.SaveChangesAsync();
         }
+    }
+
+    // --- Transaktion ---
+
+    private IQueryable<Transaktion> FilterTransaktionerByAccess(IQueryable<Transaktion> query, string? callerExtId, bool callerIsAdmin)
+    {
+        if (callerIsAdmin)
+        {
+            return query;
+        }
+
+        return query.Where(t => t.Ekonomi.EkonomiAgare.ExtId == callerExtId ||
+            t.Ekonomi.Anvandare.Any(ea => ea.Anvandare.ExtId == callerExtId));
+    }
+
+    public async Task<List<Transaktion>> GetTransaktionerAsync(string? callerExtId, bool callerIsAdmin, int? ar, int? manad)
+    {
+        var query = _db.Transaktioner
+            .Include(t => t.Datum)
+            .Include(t => t.FranKonto)
+            .Include(t => t.TillKonto)
+            .Include(t => t.Kategori)
+            .Include(t => t.Ekonomi)
+            .Include(t => t.Anvandare)
+            .AsQueryable();
+
+        query = FilterTransaktionerByAccess(query, callerExtId, callerIsAdmin);
+
+        if (ar.HasValue)
+        {
+            query = query.Where(t => t.Datum.Ar == ar.Value);
+        }
+        if (manad.HasValue)
+        {
+            query = query.Where(t => t.Datum.Manad == manad.Value);
+        }
+
+        return await query
+            .OrderByDescending(t => t.Datum.Kalenderdatum)
+            .ThenByDescending(t => t.Timestamp)
+            .ToListAsync();
+    }
+
+    public async Task<List<int>> GetTransaktionArAsync(string? callerExtId, bool callerIsAdmin)
+    {
+        var query = FilterTransaktionerByAccess(_db.Transaktioner.Include(t => t.Datum), callerExtId, callerIsAdmin);
+
+        return await query
+            .Where(t => t.Datum.Ar != null)
+            .Select(t => t.Datum.Ar!.Value)
+            .Distinct()
+            .OrderByDescending(a => a)
+            .ToListAsync();
+    }
+
+    public async Task<List<int>> GetTransaktionManaderAsync(string? callerExtId, bool callerIsAdmin, int ar)
+    {
+        var query = FilterTransaktionerByAccess(_db.Transaktioner.Include(t => t.Datum), callerExtId, callerIsAdmin);
+
+        return await query
+            .Where(t => t.Datum.Ar == ar && t.Datum.Manad != null)
+            .Select(t => t.Datum.Manad!.Value)
+            .Distinct()
+            .OrderBy(m => m)
+            .ToListAsync();
+    }
+
+    public async Task<(int Ar, int Manad)?> GetSenasteTransaktionsperiodAsync(string? callerExtId, bool callerIsAdmin)
+    {
+        var query = FilterTransaktionerByAccess(_db.Transaktioner.Include(t => t.Datum), callerExtId, callerIsAdmin);
+
+        var senaste = await query
+            .OrderByDescending(t => t.Datum.Kalenderdatum)
+            .Select(t => new { t.Datum.Ar, t.Datum.Manad })
+            .FirstOrDefaultAsync();
+
+        if (senaste is null || senaste.Ar is null || senaste.Manad is null)
+        {
+            return null;
+        }
+
+        return (senaste.Ar.Value, senaste.Manad.Value);
+    }
+
+    public async Task<(bool Success, string? Error)> CreateTransaktionAsync(
+        DateOnly datum, int franKontoId, int tillKontoId, int kategoriId, int ekonomiId,
+        int? anvandareId, decimal belopp, bool aterkommande, string? kommentar,
+        string? callerExtId, bool callerIsAdmin)
+    {
+        var datumRad = await _db.Datum.FirstOrDefaultAsync(d => d.Kalenderdatum == datum);
+        if (datumRad is null)
+        {
+            return (false, "Ogiltigt datum.");
+        }
+
+        int resolvedAnvandareId;
+        if (callerIsAdmin && anvandareId.HasValue)
+        {
+            resolvedAnvandareId = anvandareId.Value;
+        }
+        else
+        {
+            var caller = await _db.Anvandare.FirstOrDefaultAsync(a => a.ExtId == callerExtId);
+            if (caller is null)
+            {
+                return (false, "Din användare hittades inte i EkoWeb.");
+            }
+            resolvedAnvandareId = caller.Id;
+        }
+
+        if (!callerIsAdmin)
+        {
+            var harTillgang = await _db.Ekonomier.AnyAsync(e => e.Id == ekonomiId &&
+                (e.EkonomiAgare.ExtId == callerExtId || e.Anvandare.Any(ea => ea.Anvandare.ExtId == callerExtId)));
+            if (!harTillgang)
+            {
+                return (false, "Du har inte behörighet till den ekonomin.");
+            }
+        }
+
+        _db.Transaktioner.Add(new Transaktion
+        {
+            Timestamp = DateTime.UtcNow,
+            DatumId = datumRad.Id,
+            FranKontoId = franKontoId,
+            TillKontoId = tillKontoId,
+            KategoriId = kategoriId,
+            EkonomiId = ekonomiId,
+            AnvandareId = resolvedAnvandareId,
+            Belopp = belopp,
+            Aterkommande = aterkommande,
+            Kommentar = NullIfEmpty(kommentar),
+        });
+        await _db.SaveChangesAsync();
+        return (true, null);
+    }
+
+    public async Task<(bool Success, string? Error)> UpdateTransaktionAsync(
+        int id, DateOnly datum, int franKontoId, int tillKontoId, int kategoriId, int ekonomiId,
+        int anvandareId, decimal belopp, bool aterkommande, string? kommentar)
+    {
+        var transaktion = await _db.Transaktioner.FindAsync(id);
+        if (transaktion is null)
+        {
+            return (false, "Transaktionen hittades inte.");
+        }
+
+        var datumRad = await _db.Datum.FirstOrDefaultAsync(d => d.Kalenderdatum == datum);
+        if (datumRad is null)
+        {
+            return (false, "Ogiltigt datum.");
+        }
+
+        transaktion.DatumId = datumRad.Id;
+        transaktion.FranKontoId = franKontoId;
+        transaktion.TillKontoId = tillKontoId;
+        transaktion.KategoriId = kategoriId;
+        transaktion.EkonomiId = ekonomiId;
+        transaktion.AnvandareId = anvandareId;
+        transaktion.Belopp = belopp;
+        transaktion.Aterkommande = aterkommande;
+        transaktion.Kommentar = NullIfEmpty(kommentar);
+        await _db.SaveChangesAsync();
+        return (true, null);
+    }
+
+    public async Task<(bool Success, string? Error)> DeleteTransaktionAsync(int id)
+    {
+        var transaktion = await _db.Transaktioner.FindAsync(id);
+        if (transaktion is null)
+        {
+            return (false, "Transaktionen hittades inte.");
+        }
+
+        _db.Transaktioner.Remove(transaktion);
+        await _db.SaveChangesAsync();
+        return (true, null);
     }
 
     private static string? NullIfEmpty(string? value)

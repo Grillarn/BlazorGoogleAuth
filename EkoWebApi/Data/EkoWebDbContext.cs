@@ -34,6 +34,10 @@ public class EkoWebDbContext : DbContext
 
     public DbSet<KontoAnvandare> KontoAnvandare => Set<KontoAnvandare>();
 
+    public DbSet<Datum> Datum => Set<Datum>();
+
+    public DbSet<Transaktion> Transaktioner => Set<Transaktion>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Institut>().ToTable("Institut");
@@ -83,6 +87,28 @@ public class EkoWebDbContext : DbContext
             entity.Property(e => e.AndelProcent).HasColumnType("decimal(18,2)");
             entity.HasOne(e => e.Konto).WithMany(k => k.Anvandare).HasForeignKey(e => e.KontoId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.Anvandare).WithMany().HasForeignKey(e => e.AnvandareId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<Datum>(entity =>
+        {
+            entity.ToTable("Datum");
+            entity.Property(d => d.Kalenderdatum).HasColumnName("Datum");
+            entity.Property(d => d.Ar).HasColumnName("År");
+            entity.Property(d => d.Manad).HasColumnName("Månad");
+            entity.Property(d => d.Helgdag).HasConversion<short?>();
+        });
+
+        modelBuilder.Entity<Transaktion>(entity =>
+        {
+            entity.ToTable("Transaktion");
+            entity.Property(t => t.Aterkommande).HasColumnName("Återkommande").HasConversion<short>();
+            entity.Property(t => t.Belopp).HasColumnType("decimal(18,2)");
+            entity.HasOne(t => t.Datum).WithMany().HasForeignKey(t => t.DatumId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(t => t.FranKonto).WithMany().HasForeignKey(t => t.FranKontoId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(t => t.TillKonto).WithMany().HasForeignKey(t => t.TillKontoId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(t => t.Kategori).WithMany().HasForeignKey(t => t.KategoriId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(t => t.Ekonomi).WithMany().HasForeignKey(t => t.EkonomiId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(t => t.Anvandare).WithMany().HasForeignKey(t => t.AnvandareId).OnDelete(DeleteBehavior.Restrict);
         });
     }
 }

@@ -54,3 +54,46 @@ public record EkonomiDto(
     int? TransitKontoId,
     List<EkonomiAnvandareDto> Anvandare);
 public record EkonomiRequest(string Namn, string? Beskrivning, int EkonomiAgareId, int? TransitKontoId);
+
+public record TransaktionDto(
+    int Id,
+    DateOnly Datum,
+    int Ar,
+    int Manad,
+    int FranKontoId,
+    NamedRefDto FranKonto,
+    int TillKontoId,
+    NamedRefDto TillKonto,
+    int KategoriId,
+    NamedRefDto Kategori,
+    int EkonomiId,
+    NamedRefDto Ekonomi,
+    int AnvandareId,
+    AnvandareDto Anvandare,
+    decimal Belopp,
+    bool Aterkommande,
+    string? Kommentar);
+
+/// <summary>
+/// AnvandareId är valfritt - icke-admin sätts alltid till anroparens egen
+/// användare i API:et (skickat värde ignoreras), Admin kan välja fritt.
+/// </summary>
+public record SenastePeriodDto(int Ar, int Manad);
+
+/// <summary>
+/// Wrappar SenastePeriodDto i ett aldrig-null objekt - annars gör ASP.NET Core
+/// om ett null-resultat till "204 No Content" utan body, vilket får
+/// HttpClient.GetFromJsonAsync att krascha (tom body går inte att JSON-parsa).
+/// </summary>
+public record SenastePeriodResponse(SenastePeriodDto? Period);
+
+public record TransaktionRequest(
+    DateOnly Datum,
+    int FranKontoId,
+    int TillKontoId,
+    int KategoriId,
+    int EkonomiId,
+    int? AnvandareId,
+    decimal Belopp,
+    bool Aterkommande,
+    string? Kommentar);

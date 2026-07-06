@@ -1,0 +1,509 @@
+@page "/ekoweb/transaktioner"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject IEkoWebService EkoWebService
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Transaktioner</PageTitle>
+
+<h1>Transaktioner</h1>
+<p class="page-lede">
+    Transaktioner för de ekonomier du är del av, per år och månad.
+    @if (_isAdmin)
+    {
+        <text> Som Admin ser du alla transaktioner.</text>
+    }
+</p>
+
+<div class="card">
+    <h2 style="margin-top:0">Fyll i transaktioner för en ny period</h2>
+    <p class="page-lede">
+        Föreslagen period är månaden efter den senaste som har transaktioner. Återkommande
+        transaktioner från månaden innan förifylls automatiskt (med dagens datum) så du
+        bara behöver granska, justera vid behov och spara.
+    </p>
+    @if (_ekonomier is null || _ekonomier.Count == 0)
+    {
+        <p class="empty-state">Du är inte kopplad till någon ekonomi ännu - be en administratör lägga till dig under Ekonomier.</p>
+    }
+    else
+    {
+        <div class="add-role-form">
+            <label class="view-as-label">
+                Period
+                <select @bind="_periodAr">
+                    @for (var y = DateTime.Today.Year - 2; y <= DateTime.Today.Year + 2; y++)
+                    {
+                        <option value="@y">@y</option>
+                    }
+                </select>
+                <select @bind="_periodManad">
+                    @for (var m = 1; m <= 12; m++)
+                    {
+                        <option value="@m">@Manadsnamn[m - 1]</option>
+                    }
+                </select>
+            </label>
+            <button type="button" class="btn" @onclick="HamtaAterkommande">Hämta återkommande från föregående månad</button>
+        </div>
+
+        @if (_draftRows.Count > 0)
+        {
+            <div class="card-table" style="margin-top:1rem">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Datum</th>
+                            <th>Ekonomi</th>
+                            <th>Kategori</th>
+                            <th>Från</th>
+                            <th>Till</th>
+                            <th>Belopp</th>
+                            <th>Återk.</th>
+                            <th>Kommentar</th>
+                            @if (_isAdmin)
+                            {
+                                <th>Användare</th>
+                            }
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in _draftRows)
+                        {
+                            <tr>
+                                <td><input type="date" @bind="row.Datum" /></td>
+                                <td>
+                                    <select @bind="row.EkonomiId">
+                                        @foreach (var e in _ekonomier)
+                                        {
+                                            <option value="@e.Id">@e.Namn</option>
+                                        }
+                                    </select>
+                                </td>
+                                <td>
+                                    <select @bind="row.KategoriId">
+                                        @foreach (var k in (_kategorier ?? []).Where(k => k.EkonomiId == row.EkonomiId))
+                                        {
+                                            <option value="@k.Id">@k.Namn</option>
+                                        }
+                                    </select>
+                                </td>
+                                <td>
+                                    <select @bind="row.FranKontoId">
+                                        @foreach (var k in _konton ?? [])
+                                        {
+                                            <option value="@k.Id">@k.Namn</option>
+                                        }
+                                    </select>
+                                </td>
+                                <td>
+                                    <select @bind="row.TillKontoId">
+                                        @foreach (var k in _konton ?? [])
+                                        {
+                                            <option value="@k.Id">@k.Namn</option>
+                                        }
+                                    </select>
+                                </td>
+                                <td><input type="number" step="0.01" style="width:100px" @bind="row.Belopp" /></td>
+                                <td><input type="checkbox" @bind="row.Aterkommande" /></td>
+                                <td><input type="text" style="min-width:150px" @bind="row.Kommentar" @bind:event="oninput" /></td>
+                                @if (_isAdmin)
+                                {
+                                    <td>
+                                        <select @bind="row.AnvandareId">
+                                            @foreach (var a in _anvandare ?? [])
+                                            {
+                                                <option value="@a.Id">@a.Fornamn @a.Efternamn</option>
+                                            }
+                                        </select>
+                                    </td>
+                                }
+                                <td><button type="button" class="btn-delete-role" @onclick="() => _draftRows.Remove(row)">Ta bort</button></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <div style="margin-top:0.75rem">
+                <button type="button" class="btn" @onclick="SparaAllaDraft">Spara alla (@_draftRows.Count)</button>
+            </div>
+        }
+        @if (!string.IsNullOrEmpty(_draftMessage))
+        {
+            <p class="@(_draftMessageIsError ? "form-error" : "form-success")">@_draftMessage</p>
+        }
+    }
+</div>
+
+<div class="card">
+    <h2 style="margin-top:0">Ny enskild transaktion</h2>
+    @if (_ekonomier is null || _ekonomier.Count == 0)
+    {
+        <p class="empty-state">Du är inte kopplad till någon ekonomi ännu - be en administratör lägga till dig under Ekonomier.</p>
+    }
+    else
+    {
+        <div class="add-role-form" style="flex-wrap:wrap">
+            <input type="date" @bind="_datum" />
+            <select @bind="_ekonomiId" @bind:after="OnEkonomiChanged">
+                <option value="0" disabled>Välj ekonomi</option>
+                @foreach (var e in _ekonomier)
+                {
+                    <option value="@e.Id">@e.Namn</option>
+                }
+            </select>
+            <select @bind="_kategoriId">
+                <option value="0" disabled>Välj kategori</option>
+                @foreach (var k in KategorierForVald())
+                {
+                    <option value="@k.Id">@k.Namn</option>
+                }
+            </select>
+            <select @bind="_franKontoId">
+                <option value="0" disabled>Från konto</option>
+                @foreach (var k in _konton ?? [])
+                {
+                    <option value="@k.Id">@k.Namn</option>
+                }
+            </select>
+            <select @bind="_tillKontoId">
+                <option value="0" disabled>Till konto</option>
+                @foreach (var k in _konton ?? [])
+                {
+                    <option value="@k.Id">@k.Namn</option>
+                }
+            </select>
+            <input type="number" step="0.01" placeholder="Belopp" @bind="_belopp" style="width:110px" />
+            <label style="display:flex;align-items:center;gap:0.35rem;">
+                <input type="checkbox" @bind="_aterkommande" /> Återkommande
+            </label>
+            <input type="text" placeholder="Kommentar (valfritt)" @bind="_kommentar" @bind:event="oninput" style="min-width:200px" />
+            @if (_isAdmin)
+            {
+                <select @bind="_anvandareId">
+                    <option value="0">Jag själv</option>
+                    @foreach (var a in _anvandare ?? [])
+                    {
+                        <option value="@a.Id">@a.Fornamn @a.Efternamn</option>
+                    }
+                </select>
+            }
+            <button type="button" class="btn" @onclick="Create">Lägg till transaktion</button>
+        </div>
+    }
+    @if (!string.IsNullOrEmpty(_message))
+    {
+        <p class="@(_messageIsError ? "form-error" : "form-success")">@_message</p>
+    }
+</div>
+
+<div class="card">
+    <div class="add-role-form">
+        <label class="view-as-label">
+            År
+            <select @bind="_selectedAr" @bind:after="OnArChanged">
+                @foreach (var ar in _ar ?? [])
+                {
+                    <option value="@ar">@ar</option>
+                }
+            </select>
+        </label>
+        <label class="view-as-label">
+            Månad
+            <select @bind="_selectedManad" @bind:after="LoadTransaktioner">
+                <option value="0">Alla månader</option>
+                @foreach (var m in _manader ?? [])
+                {
+                    <option value="@m">@Manadsnamn[m - 1]</option>
+                }
+            </select>
+        </label>
+    </div>
+</div>
+
+@if (_loadError is not null)
+{
+    <div class="card"><p class="form-error">@_loadError</p></div>
+}
+else if (_transaktioner is null)
+{
+    <p class="empty-state">Laddar…</p>
+}
+else if (_transaktioner.Count == 0)
+{
+    <div class="card"><p class="empty-state">Inga transaktioner hittades för den här perioden.</p></div>
+}
+else
+{
+    <div class="card card-table">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Datum</th>
+                    <th>Ekonomi</th>
+                    <th>Kategori</th>
+                    <th>Från</th>
+                    <th>Till</th>
+                    <th>Belopp</th>
+                    <th>Återk.</th>
+                    <th>Kommentar</th>
+                    <th>Användare</th>
+                    @if (_isAdmin)
+                    {
+                        <th></th>
+                    }
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var t in _transaktioner)
+                {
+                    <tr>
+                        <td>@t.Datum.ToString("yyyy-MM-dd")</td>
+                        <td>@t.Ekonomi.Namn</td>
+                        <td>@t.Kategori.Namn</td>
+                        <td>@t.FranKonto.Namn</td>
+                        <td>@t.TillKonto.Namn</td>
+                        <td>@t.Belopp.ToString("N2")</td>
+                        <td>@(t.Aterkommande ? "Ja" : "Nej")</td>
+                        <td>@t.Kommentar</td>
+                        <td>@t.Anvandare.Fornamn @t.Anvandare.Efternamn</td>
+                        @if (_isAdmin)
+                        {
+                            <td>
+                                <button type="button" class="btn-delete-role" @onclick="() => Delete(t.Id)">Ta bort</button>
+                            </td>
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private static readonly string[] Manadsnamn =
+    [
+        "Januari", "Februari", "Mars", "April", "Maj", "Juni",
+        "Juli", "Augusti", "September", "Oktober", "November", "December"
+    ];
+
+    private class DraftRow
+    {
+        public DateOnly Datum { get; set; }
+        public int EkonomiId { get; set; }
+        public int KategoriId { get; set; }
+        public int FranKontoId { get; set; }
+        public int TillKontoId { get; set; }
+        public decimal Belopp { get; set; }
+        public bool Aterkommande { get; set; } = true;
+        public string Kommentar { get; set; } = string.Empty;
+        public int AnvandareId { get; set; }
+    }
+
+    private bool _isAdmin;
+    private string? _loadError;
+
+    private List<Transaktion>? _transaktioner;
+    private List<Ekonomi>? _ekonomier;
+    private List<Kategori>? _kategorier;
+    private List<Konto>? _konton;
+    private List<Anvandare>? _anvandare;
+    private List<int>? _ar;
+    private List<int>? _manader;
+
+    private int _selectedAr;
+    private int _selectedManad;
+
+    private int _periodAr;
+    private int _periodManad;
+    private readonly List<DraftRow> _draftRows = new();
+    private string? _draftMessage;
+    private bool _draftMessageIsError;
+
+    private DateOnly _datum = DateOnly.FromDateTime(DateTime.Today);
+    private int _ekonomiId;
+    private int _kategoriId;
+    private int _franKontoId;
+    private int _tillKontoId;
+    private decimal _belopp;
+    private bool _aterkommande;
+    private string _kommentar = string.Empty;
+    private int _anvandareId;
+    private string? _message;
+    private bool _messageIsError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        _isAdmin = authState.User.IsInRole("Admin");
+
+        try
+        {
+            _ekonomier = await EkoWebService.GetEkonomierAsync();
+            _kategorier = await EkoWebService.GetKategorierAsync();
+            _konton = await EkoWebService.GetKontonAsync();
+            if (_isAdmin)
+            {
+                _anvandare = await EkoWebService.GetAnvandareAsync();
+            }
+
+            _ekonomiId = _ekonomier.FirstOrDefault()?.Id ?? 0;
+
+            _ar = await EkoWebService.GetTransaktionArAsync();
+            _selectedAr = _ar.FirstOrDefault(DateTime.Today.Year);
+            if (!_ar.Contains(_selectedAr))
+            {
+                _ar.Insert(0, _selectedAr);
+            }
+
+            var senaste = await EkoWebService.GetSenasteTransaktionsperiodAsync();
+            if (senaste is null)
+            {
+                _periodAr = DateTime.Today.Year;
+                _periodManad = DateTime.Today.Month;
+            }
+            else
+            {
+                var nasta = new DateOnly(senaste.Ar, senaste.Manad, 1).AddMonths(1);
+                _periodAr = nasta.Year;
+                _periodManad = nasta.Month;
+            }
+
+            await LoadManader();
+            await HamtaAterkommande();
+            await LoadTransaktioner();
+        }
+        catch (HttpRequestException)
+        {
+            _loadError = "Kunde inte nå EkoWebApi. Kontrollera att det körs (se README).";
+        }
+    }
+
+    private async Task LoadManader()
+    {
+        _manader = await EkoWebService.GetTransaktionManaderAsync(_selectedAr);
+        if (_selectedManad != 0 && !_manader.Contains(_selectedManad))
+        {
+            _selectedManad = 0;
+        }
+    }
+
+    private async Task OnArChanged()
+    {
+        await LoadManader();
+        await LoadTransaktioner();
+    }
+
+    private async Task HamtaAterkommande()
+    {
+        var foregaende = new DateOnly(_periodAr, _periodManad, 1).AddMonths(-1);
+        var transaktioner = await EkoWebService.GetTransaktionerAsync(foregaende.Year, foregaende.Month);
+        var idag = DateOnly.FromDateTime(DateTime.Today);
+
+        _draftRows.Clear();
+        foreach (var t in transaktioner.Where(t => t.Aterkommande))
+        {
+            _draftRows.Add(new DraftRow
+            {
+                Datum = idag,
+                EkonomiId = t.EkonomiId,
+                KategoriId = t.KategoriId,
+                FranKontoId = t.FranKontoId,
+                TillKontoId = t.TillKontoId,
+                Belopp = t.Belopp,
+                Aterkommande = true,
+                Kommentar = t.Kommentar ?? string.Empty,
+                AnvandareId = t.AnvandareId,
+            });
+        }
+
+        _draftMessage = _draftRows.Count == 0
+            ? $"Inga återkommande transaktioner hittades för {Manadsnamn[foregaende.Month - 1]} {foregaende.Year}."
+            : null;
+        _draftMessageIsError = false;
+    }
+
+    private async Task SparaAllaDraft()
+    {
+        var lyckade = 0;
+        var fel = new List<string>();
+
+        foreach (var row in _draftRows.ToList())
+        {
+            var (success, error) = await EkoWebService.CreateTransaktionAsync(
+                row.Datum, row.FranKontoId, row.TillKontoId, row.KategoriId, row.EkonomiId,
+                _isAdmin ? row.AnvandareId : null,
+                row.Belopp, row.Aterkommande, row.Kommentar);
+
+            if (success)
+            {
+                lyckade++;
+                _draftRows.Remove(row);
+            }
+            else
+            {
+                fel.Add(error ?? "Okänt fel");
+            }
+        }
+
+        _draftMessage = fel.Count == 0
+            ? $"{lyckade} transaktion(er) sparades."
+            : $"{lyckade} sparades, {fel.Count} misslyckades: {string.Join("; ", fel.Distinct())}";
+        _draftMessageIsError = fel.Count > 0;
+
+        _ar = await EkoWebService.GetTransaktionArAsync();
+        await LoadManader();
+        await LoadTransaktioner();
+    }
+
+    private IEnumerable<Kategori> KategorierForVald()
+        => (_kategorier ?? []).Where(k => k.EkonomiId == _ekonomiId);
+
+    private void OnEkonomiChanged() => _kategoriId = 0;
+
+    private async Task LoadTransaktioner()
+    {
+        _transaktioner = await EkoWebService.GetTransaktionerAsync(_selectedAr, _selectedManad == 0 ? null : _selectedManad);
+    }
+
+    private async Task Create()
+    {
+        if (_ekonomiId == 0 || _kategoriId == 0 || _franKontoId == 0 || _tillKontoId == 0)
+        {
+            _message = "Fyll i ekonomi, kategori, från- och tillkonto.";
+            _messageIsError = true;
+            return;
+        }
+
+        var (success, error) = await EkoWebService.CreateTransaktionAsync(
+            _datum, _franKontoId, _tillKontoId, _kategoriId, _ekonomiId,
+            _isAdmin && _anvandareId != 0 ? _anvandareId : null,
+            _belopp, _aterkommande, _kommentar);
+
+        _message = success ? "Transaktionen sparades." : error;
+        _messageIsError = !success;
+        if (success)
+        {
+            _belopp = 0;
+            _aterkommande = false;
+            _kommentar = string.Empty;
+            _ar = await EkoWebService.GetTransaktionArAsync();
+            await LoadManader();
+            await LoadTransaktioner();
+        }
+    }
+
+    private async Task Delete(int id)
+    {
+        var (success, error) = await EkoWebService.DeleteTransaktionAsync(id);
+        _message = success ? "Transaktionen togs bort." : error;
+        _messageIsError = !success;
+        if (success)
+        {
+            _ar = await EkoWebService.GetTransaktionArAsync();
+            await LoadManader();
+        }
+        await LoadTransaktioner();
+    }
+}
